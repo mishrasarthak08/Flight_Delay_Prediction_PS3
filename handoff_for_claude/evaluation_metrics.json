@@ -1,0 +1,169 @@
+[
+  {
+    "model_name": "Logistic Regression",
+    "split": "test",
+    "num_samples": 48581,
+    "positive_count": 13047,
+    "positive_prevalence": 0.2685617834132686,
+    "pr_auc": 0.31316701392053836,
+    "roc_auc": 0.5773149366779466,
+    "brier_score_raw": 0.2592525944257503,
+    "brier_score_calibrated": 0.2145011333585104,
+    "operational_threshold": 0.889716386795044,
+    "precision_at_op_threshold": 0.0,
+    "recall_at_op_threshold": 0.0,
+    "f1_at_op_threshold": 0.0,
+    "confusion_matrix_op": {
+      "tn": 35534,
+      "fp": 0,
+      "fn": 13047,
+      "tp": 0
+    },
+    "default_threshold": 0.5,
+    "precision_at_default": 0.0,
+    "recall_at_default": 0.0,
+    "f1_at_default": 0.0,
+    "confusion_matrix_default": {
+      "tn": 35534,
+      "fp": 0,
+      "fn": 13047,
+      "tp": 0
+    },
+    "calibration_curve": {
+      "prob_true": [
+        0.20796627573906934,
+        0.3032990685419527,
+        0.327690833599489
+      ],
+      "prob_pred": [
+        0.08583185544019499,
+        0.14234169057297053,
+        0.22275419760744095
+      ]
+    },
+    "threshold_selection_metadata": {
+      "target_precision": 0.7,
+      "selected_threshold": 0.889716386795044,
+      "validation_precision_at_threshold": 0.2624113475177305,
+      "validation_recall_at_threshold": 0.004687697960217915,
+      "validation_f1_at_threshold": 0.00921085383656326,
+      "target_precision_met": false,
+      "selection_dataset": "validation",
+      "default_threshold": 0.5
+    }
+  },
+  {
+    "model_name": "XGBoost",
+    "split": "test",
+    "num_samples": 48581,
+    "positive_count": 13047,
+    "positive_prevalence": 0.2685617834132686,
+    "pr_auc": 0.36077581174811496,
+    "roc_auc": 0.6189063707306448,
+    "brier_score_raw": 0.19070691313887564,
+    "brier_score_calibrated": 0.19534176896122338,
+    "operational_threshold": 0.4606374502182007,
+    "precision_at_op_threshold": 0.43953488372093025,
+    "recall_at_op_threshold": 0.05794435502414348,
+    "f1_at_op_threshold": 0.1023904652265186,
+    "confusion_matrix_op": {
+      "tn": 34570,
+      "fp": 964,
+      "fn": 12291,
+      "tp": 756
+    },
+    "default_threshold": 0.5,
+    "precision_at_default": 0.44569288389513106,
+    "recall_at_default": 0.054725224189468846,
+    "f1_at_default": 0.09748105672742166,
+    "confusion_matrix_default": {
+      "tn": 34646,
+      "fp": 888,
+      "fn": 12333,
+      "tp": 714
+    },
+    "calibration_curve": {
+      "prob_true": [
+        0.15209176788124157,
+        0.24042483392110228,
+        0.31560118214341265,
+        0.3142857142857143,
+        0.41292276627965674,
+        0.4476122594440485
+      ],
+      "prob_pred": [
+        0.09117121136924516,
+        0.1508723364275703,
+        0.2476338996780959,
+        0.3399916945996871,
+        0.427175006109437,
+        0.5611633154127484
+      ]
+    },
+    "threshold_selection_metadata": {
+      "target_precision": 0.7,
+      "selected_threshold": 0.4606374502182007,
+      "validation_precision_at_threshold": 0.5757575757575758,
+      "validation_recall_at_threshold": 0.0024071962498416317,
+      "validation_f1_at_threshold": 0.004794347708084127,
+      "target_precision_met": false,
+      "selection_dataset": "validation",
+      "default_threshold": 0.5
+    }
+  },
+  {
+    "model_name": "PyTorch Embedding MLP",
+    "split": "test",
+    "num_samples": 48581,
+    "positive_count": 13047,
+    "positive_prevalence": 0.2685617834132686,
+    "pr_auc": 0.35849326766559814,
+    "roc_auc": 0.6134440477866909,
+    "brier_score_raw": 0.19269545590590398,
+    "brier_score_calibrated": 0.20304879183822552,
+    "operational_threshold": 0.503382682800293,
+    "precision_at_op_threshold": 0.0,
+    "recall_at_op_threshold": 0.0,
+    "f1_at_op_threshold": 0.0,
+    "confusion_matrix_op": {
+      "tn": 35534,
+      "fp": 0,
+      "fn": 13047,
+      "tp": 0
+    },
+    "default_threshold": 0.5,
+    "precision_at_default": 0.0,
+    "recall_at_default": 0.0,
+    "f1_at_default": 0.0,
+    "confusion_matrix_default": {
+      "tn": 35534,
+      "fp": 0,
+      "fn": 13047,
+      "tp": 0
+    },
+    "calibration_curve": {
+      "prob_true": [
+        0.1718534416679442,
+        0.2730615378399127,
+        0.3566330576639855,
+        0.45890760592138846
+      ],
+      "prob_pred": [
+        0.07857843033694417,
+        0.15558912714447243,
+        0.23459238136720859,
+        0.3269490333860659
+      ]
+    },
+    "threshold_selection_metadata": {
+      "target_precision": 0.7,
+      "selected_threshold": 0.503382682800293,
+      "validation_precision_at_threshold": 0.37209302325581395,
+      "validation_recall_at_threshold": 0.010135563157227924,
+      "validation_f1_at_threshold": 0.019733596396324903,
+      "target_precision_met": false,
+      "selection_dataset": "validation",
+      "default_threshold": 0.5
+    }
+  }
+]

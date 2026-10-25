@@ -1,0 +1,4 @@
+Model,PR-AUC (Avg Prec),ROC-AUC,Brier Score (Raw),Brier Score (Calibrated),Operational Threshold,Precision @ Op Threshold,Recall @ Op Threshold,F1 @ Op Threshold,F1 @ 0.50 Threshold,Test Prevalence
+Logistic Regression,0.3132,0.5773,0.2593,0.2145,0.89,0.0,0.0,0.0,0.0,0.2686
+XGBoost,0.3608,0.6189,0.1907,0.1953,0.461,0.4395,0.0579,0.1024,0.0975,0.2686
+PyTorch Embedding MLP,0.3585,0.6134,0.1927,0.203,0.503,0.0,0.0,0.0,0.0,0.2686
