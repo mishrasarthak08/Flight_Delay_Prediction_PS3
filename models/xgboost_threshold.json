@@ -1,0 +1,10 @@
+{
+  "target_precision": 0.7,
+  "selected_threshold": 0.4606374502182007,
+  "validation_precision_at_threshold": 0.5757575757575758,
+  "validation_recall_at_threshold": 0.0024071962498416317,
+  "validation_f1_at_threshold": 0.004794347708084127,
+  "target_precision_met": false,
+  "selection_dataset": "validation",
+  "default_threshold": 0.5
+}
