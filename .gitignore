@@ -1,0 +1,59 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Large Datasets & Secrets
+data/raw/*.csv
+data/raw/*.parquet
+data/processed/*
+!data/processed/.gitkeep
+!data/raw/.gitkeep
+*.zip
+*.tar.gz
+*.gz
+.kaggle/
+kaggle.json
+*.key
+*.pem
+*.token
+.env
+.env.*
+
+# Retain project output directory structures
+!.gitkeep
