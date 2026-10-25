@@ -4,7 +4,7 @@ Ensures zero data leakage: all scalers, encoders, and vocabularies are fit exclu
 on the training partition.
 """
 
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 import pickle
 from pathlib import Path
 import numpy as np
@@ -14,14 +14,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 from src.config import (
     CATEGORICAL_FEATURES,
     NUMERIC_SCHEDULE_FEATURES,
     HISTORICAL_FEATURES,
-    ALL_MODEL_FEATURES,
-    MODELS_DIR,
 )
 
 
@@ -37,23 +35,40 @@ class FlightTabularPreprocessor:
         categorical_features: Optional[List[str]] = None,
         sparse_output: bool = False,
     ):
-        self.numeric_features = numeric_features or (NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES)
-        self.categorical_features = categorical_features or CATEGORICAL_FEATURES
+        self.numeric_features = (
+            (NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES)
+            if numeric_features is None
+            else numeric_features
+        )
+        self.categorical_features = (
+            CATEGORICAL_FEATURES
+            if categorical_features is None
+            else categorical_features
+        )
         self.sparse_output = sparse_output
         self.pipeline: Optional[ColumnTransformer] = None
         self.feature_names_: List[str] = []
 
     def fit(self, X: pd.DataFrame) -> "FlightTabularPreprocessor":
         """Fits imputer, scaler, and one-hot encoder strictly on training data."""
-        num_transformer = Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-        ])
+        num_transformer = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scaler", StandardScaler()),
+            ]
+        )
 
-        cat_transformer = Pipeline([
-            ("imputer", SimpleImputer(strategy="constant", fill_value="UNKNOWN")),
-            ("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=self.sparse_output)),
-        ])
+        cat_transformer = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="constant", fill_value="UNKNOWN")),
+                (
+                    "ohe",
+                    OneHotEncoder(
+                        handle_unknown="ignore", sparse_output=self.sparse_output
+                    ),
+                ),
+            ]
+        )
 
         self.pipeline = ColumnTransformer(
             transformers=[
@@ -66,7 +81,11 @@ class FlightTabularPreprocessor:
         self.pipeline.fit(X)
 
         # Extract generated feature names
-        num_cols = self.numeric_features
+        num_cols = list(
+            self.pipeline.named_transformers_["num"].get_feature_names_out(
+                self.numeric_features
+            )
+        )
         cat_encoder = self.pipeline.named_transformers_["cat"].named_steps["ohe"]
         cat_cols = list(cat_encoder.get_feature_names_out(self.categorical_features))
         self.feature_names_ = list(num_cols) + cat_cols
@@ -106,7 +125,9 @@ class PyTorchPreprocessor:
         numeric_features: Optional[List[str]] = None,
     ):
         self.categorical_features = categorical_features or CATEGORICAL_FEATURES
-        self.numeric_features = numeric_features or (NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES)
+        self.numeric_features = numeric_features or (
+            NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
+        )
         self.vocabularies: Dict[str, Dict[str, int]] = {}
         self.vocab_sizes: Dict[str, int] = {}
         self.scaler = StandardScaler()
@@ -134,9 +155,7 @@ class PyTorchPreprocessor:
         return self
 
     def transform(
-        self,
-        X: pd.DataFrame,
-        y: Optional[np.ndarray] = None
+        self, X: pd.DataFrame, y: Optional[np.ndarray] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """
         Transforms dataframe into tensors:
@@ -145,7 +164,9 @@ class PyTorchPreprocessor:
         - y_tensor: (N, 1) of type float32 (or None)
         """
         if not self.is_fitted:
-            raise RuntimeError("PyTorchPreprocessor must be fit before calling transform.")
+            raise RuntimeError(
+                "PyTorchPreprocessor must be fit before calling transform."
+            )
 
         # Categorical index mapping
         cat_cols = []
@@ -163,7 +184,9 @@ class PyTorchPreprocessor:
 
         cat_tensor = torch.tensor(cat_array, dtype=torch.long)
         num_tensor = torch.tensor(num_scaled, dtype=torch.float32)
-        y_tensor = torch.tensor(y, dtype=torch.float32).unsqueeze(1) if y is not None else None
+        y_tensor = (
+            torch.tensor(y, dtype=torch.float32).unsqueeze(1) if y is not None else None
+        )
 
         return cat_tensor, num_tensor, y_tensor
 
@@ -186,7 +209,7 @@ class FlightDataset(Dataset):
         self,
         cat_tensor: torch.Tensor,
         num_tensor: torch.Tensor,
-        y_tensor: Optional[torch.Tensor] = None
+        y_tensor: Optional[torch.Tensor] = None,
     ):
         self.cat_tensor = cat_tensor
         self.num_tensor = num_tensor

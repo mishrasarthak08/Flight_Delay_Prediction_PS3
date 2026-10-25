@@ -4,9 +4,8 @@ Enforces the operational prediction contract and separation between targets,
 features, and excluded post-flight outcomes.
 """
 
-import json
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Dict, Any, Tuple, Optional
 import numpy as np
 import pandas as pd
 
@@ -45,8 +44,7 @@ def discover_and_map_schema(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, s
 
 
 def load_raw_dataset(
-    data_path: Optional[Path] = None,
-    nrows: Optional[int] = None
+    data_path: Optional[Path] = None, nrows: Optional[int] = None
 ) -> pd.DataFrame:
     """
     Loads raw flights dataset from CSV.
@@ -62,8 +60,7 @@ def load_raw_dataset(
 
 
 def clean_and_prepare_dataset(
-    df: pd.DataFrame,
-    delay_threshold: float = DELAY_THRESHOLD_MINUTES
+    df: pd.DataFrame, delay_threshold: float = DELAY_THRESHOLD_MINUTES
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Cleans raw dataset, maps schema, constructs binary target, filters non-operated flights,
@@ -71,9 +68,18 @@ def clean_and_prepare_dataset(
     """
     initial_row_count = len(df)
     initial_col_count = len(df.columns)
+    raw_missing_counts = {c: int(df[c].isna().sum()) for c in df.columns}
 
     # 1. Schema discovery and normalization
     df_clean, mapping = discover_and_map_schema(df)
+    key = ["year", "month", "day", "carrier", "origin", "dest", "sched_dep_time"]
+    if "flight" in df_clean:
+        key.append("flight")
+    duplicate_count = int(df_clean.duplicated(key).sum())
+    if duplicate_count:
+        raise ValueError(
+            f"Found {duplicate_count} duplicate flight keys; resolve these before modeling."
+        )
 
     # 2. Date construction
     df_clean["flight_date"] = pd.to_datetime(
@@ -86,18 +92,24 @@ def clean_and_prepare_dataset(
     # 3. Analyze target and missingness (Operational Population definition)
     # Target: arrival delay >= 15 minutes among operated flights with observed outcome
     raw_target_nulls = int(df_clean[RAW_TARGET_COL].isna().sum())
-    
+
     # Exclude flights with missing arrival delay (cancellations and diversions)
     df_operated = df_clean[df_clean[RAW_TARGET_COL].notna()].copy()
-    excluded_count = initial_row_count - len(df_operated)
+    excluded_count = raw_target_nulls
 
     # 4. Binary target construction
-    df_operated[TARGET_COL] = (df_operated[RAW_TARGET_COL] >= delay_threshold).astype(int)
+    df_operated[TARGET_COL] = (df_operated[RAW_TARGET_COL] >= delay_threshold).astype(
+        int
+    )
 
     # 5. Clean string categorical identifiers
     for cat_col in ["carrier", "origin", "dest"]:
         if cat_col in df_operated.columns:
-            df_operated[cat_col] = df_operated[cat_col].astype(str).str.strip().str.upper()
+            if df_operated[cat_col].isna().any():
+                raise ValueError(f"Missing categorical identifiers in {cat_col}.")
+            df_operated[cat_col] = (
+                df_operated[cat_col].astype(str).str.strip().str.upper()
+            )
 
     # Route identifier
     df_operated["route"] = df_operated["origin"] + "_" + df_operated["dest"]
@@ -105,12 +117,22 @@ def clean_and_prepare_dataset(
     # Distance check
     df_operated["distance"] = pd.to_numeric(df_operated["distance"], errors="coerce")
     df_operated = df_operated[df_operated["distance"] > 0]
+    from src.timeutils import hhmm_minutes
+
+    hhmm_minutes(df_operated["sched_dep_time"])
+    hhmm_minutes(df_operated["sched_arr_time"])
 
     # Audit statistics
     target_series = df_operated[TARGET_COL]
     audit_stats = {
         "initial_raw_rows": initial_row_count,
         "initial_raw_cols": initial_col_count,
+        "raw_missing_counts": raw_missing_counts,
+        "duplicate_flight_keys": duplicate_count,
+        "invalid_dates_excluded": int(invalid_dates),
+        "invalid_distance_excluded": int(
+            len(df_clean[df_clean[RAW_TARGET_COL].notna()]) - len(df_operated)
+        ),
         "mapped_columns": mapping,
         "excluded_cancellations_or_missing_target": excluded_count,
         "operated_flights_count": len(df_operated),
@@ -134,7 +156,51 @@ def clean_and_prepare_dataset(
     return df_operated, audit_stats
 
 
-def generate_synthetic_dataset(n_samples: int = 1000, random_seed: int = 42) -> pd.DataFrame:
+def attach_label_availability(df, reporting_lag_hours=24):
+    """Audit arrival timestamps and add a conservative, declared reporting lag.
+
+    These outcome-derived timestamps control which HISTORICAL labels can be
+    read. They never enter the predictive feature matrix. The source lacks
+    actual publication timestamps, so the 24-hour lag is an explicit assumption.
+    """
+    from src.timeutils import (
+        arrival_timestamps,
+        airport_timezones,
+        departure_timestamps,
+    )
+
+    result = df.copy()
+    dep = departure_timestamps(result)
+    arrival = arrival_timestamps(result, dep) + pd.to_timedelta(
+        result[RAW_TARGET_COL], unit="m"
+    )
+    clocks_match = pd.Series(False, index=result.index)
+    for dest, idx in result.groupby("dest").groups.items():
+        local = arrival.loc[idx].dt.tz_convert(airport_timezones()[dest])
+        derived = local.dt.hour * 100 + local.dt.minute
+        recorded = pd.to_numeric(result.loc[idx, "arr_time"], errors="coerce") % 2400
+        clocks_match.loc[idx] = (derived == recorded).to_numpy()
+    actual_dep = dep + pd.to_timedelta(result["dep_delay"], unit="m")
+    elapsed = (arrival - actual_dep).dt.total_seconds() / 60
+    ground_minutes = elapsed - result["air_time"]
+    plausible = ground_minutes.between(0, 720) & clocks_match
+    result["label_available_at"] = (
+        arrival + pd.Timedelta(hours=reporting_lag_hours)
+    ).where(plausible)
+    audit = {
+        "reporting_lag_hours": reporting_lag_hours,
+        "arrival_clock_mismatches": int((~clocks_match).sum()),
+        "history_labels_excluded_by_timestamp_audit": int((~plausible).sum()),
+        "history_labels_usable": int(plausible.sum()),
+        "scheduled_arrival_date_assumption": "First destination local schedule clock after departure, trips under 24h.",
+        "reporting_assumption": "Arrival outcome becomes available 24h after reconstructed actual arrival; true feed timestamps unavailable.",
+    }
+    return result, audit
+
+
+def generate_synthetic_dataset(
+    n_samples: int = 1000, random_seed: int = 42
+) -> pd.DataFrame:
     """
     Generates a realistic synthetic flight dataset fixture for unit testing and offline checks.
     """
@@ -160,27 +226,33 @@ def generate_synthetic_dataset(n_samples: int = 1000, random_seed: int = 42) -> 
     is_cancelled = np.random.binomial(1, 0.025, size=n_samples).astype(bool)
     delays[is_cancelled] = np.nan
 
-    df = pd.DataFrame({
-        "id": np.arange(n_samples),
-        "year": sample_dates.year,
-        "month": sample_dates.month,
-        "day": sample_dates.day,
-        "dep_time": np.where(is_cancelled, np.nan, sched_dep_times + 5),
-        "sched_dep_time": sched_dep_times,
-        "dep_delay": np.where(is_cancelled, np.nan, np.random.normal(5, 15, n_samples)),
-        "arr_time": np.where(is_cancelled, np.nan, sched_arr_times + 10),
-        "sched_arr_time": sched_arr_times,
-        "arr_delay": delays,
-        "carrier": np.random.choice(carriers, size=n_samples),
-        "flight": np.random.randint(100, 9999, size=n_samples),
-        "tailnum": ["N" + str(np.random.randint(10000, 99999)) for _ in range(n_samples)],
-        "origin": np.random.choice(origins, size=n_samples),
-        "dest": np.random.choice(dests, size=n_samples),
-        "air_time": np.where(is_cancelled, np.nan, durations - 20),
-        "distance": np.random.randint(200, 2600, size=n_samples),
-        "hour": sched_dep_hours,
-        "minute": sched_dep_mins,
-        "time_hour": sample_dates.strftime("%Y-%m-%d %H:00:00"),
-        "name": "Sample Airline Inc.",
-    })
+    df = pd.DataFrame(
+        {
+            "id": np.arange(n_samples),
+            "year": sample_dates.year,
+            "month": sample_dates.month,
+            "day": sample_dates.day,
+            "dep_time": np.where(is_cancelled, np.nan, sched_dep_times + 5),
+            "sched_dep_time": sched_dep_times,
+            "dep_delay": np.where(
+                is_cancelled, np.nan, np.random.normal(5, 15, n_samples)
+            ),
+            "arr_time": np.where(is_cancelled, np.nan, sched_arr_times + 10),
+            "sched_arr_time": sched_arr_times,
+            "arr_delay": delays,
+            "carrier": np.random.choice(carriers, size=n_samples),
+            "flight": np.random.randint(100, 9999, size=n_samples),
+            "tailnum": [
+                "N" + str(np.random.randint(10000, 99999)) for _ in range(n_samples)
+            ],
+            "origin": np.random.choice(origins, size=n_samples),
+            "dest": np.random.choice(dests, size=n_samples),
+            "air_time": np.where(is_cancelled, np.nan, durations - 20),
+            "distance": np.random.randint(200, 2600, size=n_samples),
+            "hour": sched_dep_hours,
+            "minute": sched_dep_mins,
+            "time_hour": sample_dates.strftime("%Y-%m-%d %H:00:00"),
+            "name": "Sample Airline Inc.",
+        }
+    )
     return df

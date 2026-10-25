@@ -7,8 +7,11 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from src.features import HistoricalFeatureGenerator, compute_schedule_and_calendar_features
-from src.config import SmoothingConfig, TARGET_COL, FORBIDDEN_COLUMNS
+from src.features import (
+    HistoricalFeatureGenerator,
+    compute_schedule_and_calendar_features,
+)
+from src.config import SmoothingConfig, TARGET_COL
 from src.validation import audit_feature_matrix_for_forbidden_columns, DataLeakageError
 
 
@@ -26,35 +29,47 @@ def test_future_label_mutation_invariance():
 
     for d in dates:
         for _ in range(20):
-            records.append({
-                "flight_date": d,
-                "sched_dep_time": 900,
-                "sched_arr_time": 1200,
-                "carrier": np.random.choice(carriers),
-                "origin": np.random.choice(origins),
-                "dest": np.random.choice(dests),
-                "route": "EWR_ORD",
-                "distance": 719,
-                TARGET_COL: np.random.choice([0, 1]),
-            })
+            records.append(
+                {
+                    "flight_date": d,
+                    "sched_dep_time": 900,
+                    "sched_arr_time": 1200,
+                    "carrier": np.random.choice(carriers),
+                    "origin": np.random.choice(origins),
+                    "dest": np.random.choice(dests),
+                    "route": "EWR_ORD",
+                    "distance": 719,
+                    TARGET_COL: np.random.choice([0, 1]),
+                }
+            )
 
     df_base = pd.DataFrame(records)
     df_base = compute_schedule_and_calendar_features(df_base)
 
     # 1. Compute historical rates on original dataset
-    gen_orig = HistoricalFeatureGenerator(SmoothingConfig(carrier_m=10.0, default_prior_delay_rate=0.25))
-    df_out_orig = gen_orig.fit_transform_chronological(df_base, date_col="flight_date", target_col=TARGET_COL)
+    gen_orig = HistoricalFeatureGenerator(
+        SmoothingConfig(carrier_m=10.0, default_prior_delay_rate=0.25)
+    )
+    df_out_orig = gen_orig.fit_transform_chronological(
+        df_base, date_col="flight_date", target_col=TARGET_COL
+    )
 
     # 2. Mutate future flight outcomes on dates >= Day 5
     cutoff_date = dates[4].date()
     df_mutated = df_base.copy()
     future_mask = pd.to_datetime(df_mutated["flight_date"]).dt.date >= cutoff_date
     # Invert all future targets: 0 -> 1, 1 -> 0
-    df_mutated.loc[future_mask, TARGET_COL] = 1 - df_mutated.loc[future_mask, TARGET_COL]
+    df_mutated.loc[future_mask, TARGET_COL] = (
+        1 - df_mutated.loc[future_mask, TARGET_COL]
+    )
 
     # Re-run historical feature generator on mutated dataset
-    gen_mut = HistoricalFeatureGenerator(SmoothingConfig(carrier_m=10.0, default_prior_delay_rate=0.25))
-    df_out_mut = gen_mut.fit_transform_chronological(df_mutated, date_col="flight_date", target_col=TARGET_COL)
+    gen_mut = HistoricalFeatureGenerator(
+        SmoothingConfig(carrier_m=10.0, default_prior_delay_rate=0.25)
+    )
+    df_out_mut = gen_mut.fit_transform_chronological(
+        df_mutated, date_col="flight_date", target_col=TARGET_COL
+    )
 
     # 3. Assert earlier rows (dates < Day 5) have EXACT same historical features
     past_mask = pd.to_datetime(df_base["flight_date"]).dt.date < cutoff_date
@@ -73,7 +88,7 @@ def test_future_label_mutation_invariance():
             orig_vals,
             mut_vals,
             decimal=7,
-            err_msg=f"Leakage detected! Column '{col}' changed for past flights when future labels mutated."
+            err_msg=f"Leakage detected! Column '{col}' changed for past flights when future labels mutated.",
         )
 
 

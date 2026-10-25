@@ -5,32 +5,29 @@ and verification of allowed vs forbidden features.
 
 from typing import List, Set, Dict, Any, Union
 import pandas as pd
-import numpy as np
 
 from src.config import (
     FORBIDDEN_COLUMNS,
     TARGET_COL,
     RAW_TARGET_COL,
     ALL_MODEL_FEATURES,
-    CATEGORICAL_FEATURES,
-    NUMERIC_SCHEDULE_FEATURES,
-    HISTORICAL_FEATURES,
 )
 
 
 class DataLeakageError(ValueError):
     """Raised when forbidden columns or future target outcomes leak into the feature set."""
+
     pass
 
 
 class SchemaValidationError(ValueError):
     """Raised when required features are missing or corrupt in the feature matrix."""
+
     pass
 
 
 def audit_feature_matrix_for_forbidden_columns(
-    feature_columns: Union[List[str], pd.Index, Set[str]],
-    strict: bool = True
+    feature_columns: Union[List[str], pd.Index, Set[str]], strict: bool = True
 ) -> Dict[str, Any]:
     """
     Scans a list of feature columns against the explicit forbidden fields list.
@@ -63,8 +60,7 @@ def audit_feature_matrix_for_forbidden_columns(
 
 
 def validate_inference_features(
-    df: pd.DataFrame,
-    expected_features: List[str] = ALL_MODEL_FEATURES
+    df: pd.DataFrame, expected_features: List[str] = ALL_MODEL_FEATURES
 ) -> None:
     """
     Validates that an inference dataframe contains all necessary model features
@@ -80,9 +76,7 @@ def validate_inference_features(
 
 
 def verify_no_future_leakage_in_splits(
-    train_dates: pd.Series,
-    val_dates: pd.Series,
-    test_dates: pd.Series
+    train_dates: pd.Series, val_dates: pd.Series, test_dates: pd.Series
 ) -> None:
     """
     Verifies that train, validation, and test date sets are strictly disjoint and monotonically ordered.

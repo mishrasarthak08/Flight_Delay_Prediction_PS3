@@ -3,7 +3,7 @@ Training routines for Logistic Regression, XGBoost, and PyTorch Embedding MLP.
 Enforces validation monitoring, early stopping, and checkpointing.
 """
 
-from typing import Dict, Any, Tuple, Optional
+from typing import Tuple, Optional
 from pathlib import Path
 import json
 import numpy as np
@@ -15,7 +15,6 @@ from sklearn.metrics import average_precision_score
 
 from src.config import (
     ModelHyperparams,
-    PipelineConfig,
     MODELS_DIR,
     TARGET_COL,
     CATEGORICAL_FEATURES,
@@ -40,26 +39,37 @@ def train_logistic_regression(
     hyperparams: ModelHyperparams = ModelHyperparams(),
     random_seed: int = 42,
     output_dir: Path = MODELS_DIR,
-) -> Tuple[LogisticRegressionBaseline, FlightTabularPreprocessor, np.ndarray, np.ndarray]:
+    numeric_features=None,
+) -> Tuple[
+    LogisticRegressionBaseline, FlightTabularPreprocessor, np.ndarray, np.ndarray
+]:
     """
     Trains Logistic Regression baseline using scikit-learn preprocessing pipeline.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    preprocessor = FlightTabularPreprocessor(sparse_output=False)
+    preprocessor = FlightTabularPreprocessor(
+        numeric_features=numeric_features, sparse_output=False
+    )
 
-    feature_cols = CATEGORICAL_FEATURES + NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
-    X_train = np.ascontiguousarray(preprocessor.fit_transform(train_df[feature_cols]), dtype=np.float32)
+    feature_cols = (
+        CATEGORICAL_FEATURES + NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
+    )
+    X_train = np.ascontiguousarray(
+        preprocessor.fit_transform(train_df[feature_cols]), dtype=np.float32
+    )
     y_train = np.ascontiguousarray(train_df[TARGET_COL].values, dtype=np.int32)
 
-    X_val = np.ascontiguousarray(preprocessor.transform(val_df[feature_cols]), dtype=np.float32)
-    y_val = np.ascontiguousarray(val_df[TARGET_COL].values, dtype=np.int32)
+    X_val = np.ascontiguousarray(
+        preprocessor.transform(val_df[feature_cols]), dtype=np.float32
+    )
 
     model = LogisticRegressionBaseline(hyperparams=hyperparams, random_seed=random_seed)
     model.fit(X_train, y_train)
 
     # Save artifacts
-    preprocessor.save(output_dir / "tabular_preprocessor.pkl")
+    preprocessor.save(output_dir / "logistic_regression_preprocessor.pkl")
     import pickle
+
     with open(output_dir / "logistic_regression.pkl", "wb") as f:
         pickle.dump(model, f)
 
@@ -80,21 +90,28 @@ def train_xgboost(
     Trains XGBoost model with early stopping on validation split.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    feature_cols = CATEGORICAL_FEATURES + NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
+    feature_cols = (
+        CATEGORICAL_FEATURES + NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
+    )
 
-    X_train = np.ascontiguousarray(preprocessor.transform(train_df[feature_cols]), dtype=np.float32)
+    X_train = np.ascontiguousarray(
+        preprocessor.transform(train_df[feature_cols]), dtype=np.float32
+    )
     y_train = np.ascontiguousarray(train_df[TARGET_COL].values, dtype=np.float32)
 
-    X_val = np.ascontiguousarray(preprocessor.transform(val_df[feature_cols]), dtype=np.float32)
+    X_val = np.ascontiguousarray(
+        preprocessor.transform(val_df[feature_cols]), dtype=np.float32
+    )
     y_val = np.ascontiguousarray(val_df[TARGET_COL].values, dtype=np.float32)
 
     print(f"     Fitting XGBoost hist on {X_train.shape}...")
     model = XGBoostModel(hyperparams=hyperparams, random_seed=random_seed)
     model.fit(X_train, y_train, X_val, y_val)
-    print(f"     XGBoost fitted successfully! Best iteration: {model.model.best_iteration}")
+    print(f"     XGBoost fitted successfully! Rounds: {model.model.n_estimators}")
 
     # Save artifact
     import pickle
+
     with open(output_dir / "xgboost.pkl", "wb") as f:
         pickle.dump(model, f)
 
@@ -110,6 +127,8 @@ def train_pytorch_mlp(
     random_seed: int = 42,
     device: Optional[torch.device] = None,
     output_dir: Path = MODELS_DIR,
+    select_checkpoint: bool = True,
+    numeric_features=None,
 ) -> Tuple[FlightEmbeddingMLP, PyTorchPreprocessor, np.ndarray, np.ndarray]:
     """
     Trains PyTorch Embedding MLP with early stopping on validation loss.
@@ -122,8 +141,10 @@ def train_pytorch_mlp(
         device = torch.device("cpu")
 
     # Fit PyTorch Preprocessor strictly on training data
-    preprocessor = PyTorchPreprocessor()
-    feature_cols = CATEGORICAL_FEATURES + NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
+    preprocessor = PyTorchPreprocessor(numeric_features=numeric_features)
+    feature_cols = (
+        CATEGORICAL_FEATURES + NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
+    )
     preprocessor.fit(train_df[feature_cols])
 
     # Convert to Tensors
@@ -180,6 +201,7 @@ def train_pytorch_mlp(
     patience = hyperparams.mlp_early_stopping_patience
     patience_counter = 0
 
+    history = []
     for epoch in range(1, hyperparams.mlp_epochs + 1):
         model.train()
         train_loss = 0.0
@@ -216,11 +238,25 @@ def train_pytorch_mlp(
         val_loss /= len(val_dataset)
         val_probs_arr = np.concatenate(val_preds_list)
         val_prauc = average_precision_score(y_val, val_probs_arr)
-        print(f"     [Epoch {epoch}/{hyperparams.mlp_epochs}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val PR-AUC: {val_prauc:.4f}")
+        history.append(
+            {
+                "epoch": epoch,
+                "train_log_loss": float(train_loss),
+                "monitor_log_loss": float(val_loss),
+                "monitor_average_precision": float(val_prauc),
+            }
+        )
+        print(
+            f"     [Epoch {epoch}/{hyperparams.mlp_epochs}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val PR-AUC: {val_prauc:.4f}"
+        )
 
+        if not select_checkpoint:
+            continue
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_state_dict = {
+                k: v.cpu().clone() for k, v in model.state_dict().items()
+            }
             patience_counter = 0
         else:
             patience_counter += 1
@@ -232,11 +268,24 @@ def train_pytorch_mlp(
         model.load_state_dict(best_state_dict)
 
     # Save artifacts
+    with open(output_dir / "pytorch_training_history.json", "w") as f:
+        json.dump(
+            {
+                "checkpoint_selection": (
+                    "training_internal_monitor"
+                    if select_checkpoint
+                    else "fixed_epochs_no_monitor_selection"
+                ),
+                "history": history,
+            },
+            f,
+            indent=2,
+        )
     preprocessor.save(output_dir / "pytorch_preprocessor.pkl")
     model.save_checkpoint(
         output_dir / "pytorch_mlp.pt",
         config_dict={
-            "best_val_loss": float(best_val_loss),
+            "best_val_loss": float(best_val_loss) if select_checkpoint else None,
             "epochs_run": epoch,
             "random_seed": random_seed,
         },

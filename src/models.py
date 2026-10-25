@@ -7,11 +7,10 @@ Includes:
 """
 
 import os
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
-from typing import Dict, Any, List, Optional, Tuple
-import json
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 import numpy as np
 import torch
@@ -25,7 +24,9 @@ from src.config import ModelHyperparams
 class LogisticRegressionBaseline:
     """Logistic Regression baseline classifier wrapper."""
 
-    def __init__(self, hyperparams: ModelHyperparams = ModelHyperparams(), random_seed: int = 42):
+    def __init__(
+        self, hyperparams: ModelHyperparams = ModelHyperparams(), random_seed: int = 42
+    ):
         self.model = LogisticRegression(
             C=hyperparams.lr_c,
             max_iter=hyperparams.lr_max_iter,
@@ -48,7 +49,9 @@ class LogisticRegressionBaseline:
 class XGBoostModel:
     """XGBoost Gradient Boosted Classifier wrapper."""
 
-    def __init__(self, hyperparams: ModelHyperparams = ModelHyperparams(), random_seed: int = 42):
+    def __init__(
+        self, hyperparams: ModelHyperparams = ModelHyperparams(), random_seed: int = 42
+    ):
         self.hyperparams = hyperparams
         self.random_seed = random_seed
         self.model = xgb.XGBClassifier(
@@ -62,6 +65,8 @@ class XGBoostModel:
             random_state=random_seed,
             n_jobs=hyperparams.xgb_n_jobs,
             early_stopping_rounds=hyperparams.xgb_early_stopping_rounds,
+            reg_lambda=hyperparams.xgb_reg_lambda,
+            min_child_weight=hyperparams.xgb_min_child_weight,
         )
 
     def fit(
@@ -69,7 +74,7 @@ class XGBoostModel:
         X_train: np.ndarray,
         y_train: np.ndarray,
         X_val: Optional[np.ndarray] = None,
-        y_val: Optional[np.ndarray] = None
+        y_val: Optional[np.ndarray] = None,
     ) -> "XGBoostModel":
         X_train_c = np.ascontiguousarray(X_train, dtype=np.float32)
         y_train_c = np.ascontiguousarray(y_train, dtype=np.float32)
@@ -131,12 +136,16 @@ class FlightEmbeddingMLP(nn.Module):
         self.dropout_rate = dropout
 
         # Categorical Embeddings
-        self.carrier_embedding = nn.Embedding(num_carriers, carrier_emb_dim, padding_idx=0)
+        self.carrier_embedding = nn.Embedding(
+            num_carriers, carrier_emb_dim, padding_idx=0
+        )
         self.origin_embedding = nn.Embedding(num_origins, origin_emb_dim, padding_idx=0)
         self.dest_embedding = nn.Embedding(num_dests, dest_emb_dim, padding_idx=0)
 
         # Total input dimension into MLP
-        total_in_dim = carrier_emb_dim + origin_emb_dim + dest_emb_dim + num_numeric_features
+        total_in_dim = (
+            carrier_emb_dim + origin_emb_dim + dest_emb_dim + num_numeric_features
+        )
 
         # Dense MLP Backbone
         layers: List[nn.Module] = []
@@ -152,7 +161,9 @@ class FlightEmbeddingMLP(nn.Module):
         layers.append(nn.Linear(curr_dim, 1))
         self.backbone = nn.Sequential(*layers)
 
-    def forward(self, cat_tensor: torch.Tensor, num_tensor: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, cat_tensor: torch.Tensor, num_tensor: torch.Tensor
+    ) -> torch.Tensor:
         """
         cat_tensor: (batch_size, 3) where columns are [carrier_idx, origin_idx, dest_idx]
         num_tensor: (batch_size, num_numeric_features)
@@ -171,7 +182,7 @@ class FlightEmbeddingMLP(nn.Module):
         self,
         cat_tensor: torch.Tensor,
         num_tensor: torch.Tensor,
-        device: torch.device = torch.device("cpu")
+        device: torch.device = torch.device("cpu"),
     ) -> np.ndarray:
         """Computes sigmoid probabilities in evaluation mode."""
         self.eval()
@@ -182,7 +193,9 @@ class FlightEmbeddingMLP(nn.Module):
             probs = torch.sigmoid(logits).cpu().numpy().flatten()
         return probs
 
-    def save_checkpoint(self, filepath: Path, config_dict: Optional[Dict[str, Any]] = None) -> None:
+    def save_checkpoint(
+        self, filepath: Path, config_dict: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Saves model weights and architecture configuration."""
         filepath.parent.mkdir(parents=True, exist_ok=True)
         checkpoint = {
@@ -203,7 +216,9 @@ class FlightEmbeddingMLP(nn.Module):
         torch.save(checkpoint, filepath)
 
     @classmethod
-    def load_checkpoint(cls, filepath: Path, device: torch.device = torch.device("cpu")) -> "FlightEmbeddingMLP":
+    def load_checkpoint(
+        cls, filepath: Path, device: torch.device = torch.device("cpu")
+    ) -> "FlightEmbeddingMLP":
         """Loads model from checkpoint."""
         checkpoint = torch.load(filepath, map_location=device, weights_only=False)
         arch = checkpoint["architecture"]

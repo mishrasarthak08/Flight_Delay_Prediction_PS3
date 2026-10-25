@@ -1,0 +1,9 @@
+model,features,numeric_feature_count,evaluation_partition,average_precision,roc_auc,brier_score
+logistic_regression,schedule_calendar,19,calibration_selection,0.3387695614915049,0.6894499633471941,0.14947158098220825
+xgboost,schedule_calendar,19,calibration_selection,0.32863236565200726,0.6711515689397605,0.14412136375904083
+logistic_regression,plus_history,30,calibration_selection,0.33487325586161154,0.6900701928437284,0.14844462275505066
+xgboost,plus_history,30,calibration_selection,0.28947514682126274,0.6650156573349824,0.1449843943119049
+logistic_regression,plus_scheduled_demand,32,calibration_selection,0.33921539487647817,0.6947736394752041,0.14793051779270172
+xgboost,plus_scheduled_demand,32,calibration_selection,0.2866362839997821,0.6648293296609042,0.1449197381734848
+logistic_regression,frozen_history_reference,32,calibration_selection,0.3348466214444797,0.6913089879610402,0.14552240073680878
+xgboost,frozen_history_reference,32,calibration_selection,0.30740725573110217,0.6730040172827567,0.1440679281949997

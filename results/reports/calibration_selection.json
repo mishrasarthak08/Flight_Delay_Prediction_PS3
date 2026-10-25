@@ -1,0 +1,56 @@
+{
+  "logistic_regression": {
+    "selected_method": "none",
+    "selection_dataset": "calibration_selection",
+    "candidates": [
+      {
+        "method": "none",
+        "selection_brier_score": 0.14793235063552856
+      },
+      {
+        "method": "sigmoid",
+        "selection_brier_score": 0.15594764053821564
+      },
+      {
+        "method": "isotonic",
+        "selection_brier_score": 0.15604498982429504
+      }
+    ]
+  },
+  "xgboost": {
+    "selected_method": "none",
+    "selection_dataset": "calibration_selection",
+    "candidates": [
+      {
+        "method": "none",
+        "selection_brier_score": 0.14268247783184052
+      },
+      {
+        "method": "sigmoid",
+        "selection_brier_score": 0.15034736692905426
+      },
+      {
+        "method": "isotonic",
+        "selection_brier_score": 0.15022076666355133
+      }
+    ]
+  },
+  "pytorch_mlp": {
+    "selected_method": "none",
+    "selection_dataset": "calibration_selection",
+    "candidates": [
+      {
+        "method": "none",
+        "selection_brier_score": 0.15169274806976318
+      },
+      {
+        "method": "sigmoid",
+        "selection_brier_score": 0.15388497710227966
+      },
+      {
+        "method": "isotonic",
+        "selection_brier_score": 0.1527486890554428
+      }
+    ]
+  }
+}

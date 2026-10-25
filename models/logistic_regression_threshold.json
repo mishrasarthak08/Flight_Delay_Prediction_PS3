@@ -1,10 +1,16 @@
 {
   "target_precision": 0.7,
-  "selected_threshold": 0.889716386795044,
-  "validation_precision_at_threshold": 0.2624113475177305,
-  "validation_recall_at_threshold": 0.004687697960217915,
-  "validation_f1_at_threshold": 0.00921085383656326,
+  "selected_threshold": 0.09063205868005753,
+  "validation_precision_at_threshold": 0.23108961440279457,
+  "validation_recall_at_threshold": 0.6325855093784479,
+  "validation_f1_at_threshold": 0.33851603975762845,
   "target_precision_met": false,
-  "selection_dataset": "validation",
-  "default_threshold": 0.5
+  "selection_dataset": "threshold_validation",
+  "probability_scale": "selected_calibrator_output",
+  "selection_rule": "max_recall_at_target_precision_else_max_f1_with_minimum_alert_support",
+  "minimum_alerts": 100,
+  "validation_alert_count": 7443,
+  "default_threshold": 0.5,
+  "calibration_method": "none",
+  "policy_available_at": "2013-11-07T08:00:00+00:00"
 }

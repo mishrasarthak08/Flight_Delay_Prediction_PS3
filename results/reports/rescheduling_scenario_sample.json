@@ -4,75 +4,96 @@
     "origin": "JFK",
     "dest": "MIA",
     "original_sched_dep": "07:10",
-    "distance": 1089
+    "distance": 1089.0
   },
-  "baseline_delay_probability": 0.0931,
-  "optimal_shift_minutes": 0,
-  "optimal_delay_probability": 0.0931,
-  "best_risk_difference": 0.0,
+  "baseline_delay_probability": 0.10281077772378922,
+  "optimal_shift_minutes": -30,
+  "optimal_delay_probability": 0.10014408826828003,
+  "best_risk_difference": -0.002666689455509186,
   "scenarios": [
     {
       "shift_minutes": -60,
-      "predicted_delay_probability": 0.0931,
-      "absolute_risk_difference": -0.0,
-      "relative_risk_change_pct": -0.0
+      "candidate_departure": "2013-11-07T11:10:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.10014408826828003,
+      "absolute_risk_difference": -0.002666689455509186,
+      "relative_risk_change_pct": -2.593783953928932
     },
     {
       "shift_minutes": -30,
-      "predicted_delay_probability": 0.0931,
-      "absolute_risk_difference": -0.0,
-      "relative_risk_change_pct": -0.0
+      "candidate_departure": "2013-11-07T11:40:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.10014408826828003,
+      "absolute_risk_difference": -0.002666689455509186,
+      "relative_risk_change_pct": -2.593783953928932
     },
     {
       "shift_minutes": 0,
-      "predicted_delay_probability": 0.0931,
+      "candidate_departure": "2013-11-07T12:10:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.10281077772378922,
       "absolute_risk_difference": 0.0,
       "relative_risk_change_pct": 0.0
     },
     {
       "shift_minutes": 30,
-      "predicted_delay_probability": 0.0931,
-      "absolute_risk_difference": -0.0,
-      "relative_risk_change_pct": -0.0
+      "candidate_departure": "2013-11-07T12:40:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.10281077772378922,
+      "absolute_risk_difference": 0.0,
+      "relative_risk_change_pct": 0.0
     },
     {
       "shift_minutes": 60,
-      "predicted_delay_probability": 0.1021,
-      "absolute_risk_difference": 0.009,
-      "relative_risk_change_pct": 9.64
+      "candidate_departure": "2013-11-07T13:10:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.11647772043943405,
+      "absolute_risk_difference": 0.013666942715644836,
+      "relative_risk_change_pct": 13.293297666089405
     }
   ],
   "ranked_candidates": [
     {
+      "shift_minutes": -30,
+      "candidate_departure": "2013-11-07T11:40:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.10014408826828003,
+      "absolute_risk_difference": -0.002666689455509186,
+      "relative_risk_change_pct": -2.593783953928932
+    },
+    {
+      "shift_minutes": -60,
+      "candidate_departure": "2013-11-07T11:10:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.10014408826828003,
+      "absolute_risk_difference": -0.002666689455509186,
+      "relative_risk_change_pct": -2.593783953928932
+    },
+    {
       "shift_minutes": 0,
-      "predicted_delay_probability": 0.0931,
+      "candidate_departure": "2013-11-07T12:10:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.10281077772378922,
       "absolute_risk_difference": 0.0,
       "relative_risk_change_pct": 0.0
     },
     {
-      "shift_minutes": -30,
-      "predicted_delay_probability": 0.0931,
-      "absolute_risk_difference": -0.0,
-      "relative_risk_change_pct": -0.0
-    },
-    {
       "shift_minutes": 30,
-      "predicted_delay_probability": 0.0931,
-      "absolute_risk_difference": -0.0,
-      "relative_risk_change_pct": -0.0
-    },
-    {
-      "shift_minutes": -60,
-      "predicted_delay_probability": 0.0931,
-      "absolute_risk_difference": -0.0,
-      "relative_risk_change_pct": -0.0
+      "candidate_departure": "2013-11-07T12:40:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.10281077772378922,
+      "absolute_risk_difference": 0.0,
+      "relative_risk_change_pct": 0.0
     },
     {
       "shift_minutes": 60,
-      "predicted_delay_probability": 0.1021,
-      "absolute_risk_difference": 0.009,
-      "relative_risk_change_pct": 9.64
+      "candidate_departure": "2013-11-07T13:10:00+00:00",
+      "scheduled_duration_minutes": 195.0,
+      "predicted_delay_probability": 0.11647772043943405,
+      "absolute_risk_difference": 0.013666942715644836,
+      "relative_risk_change_pct": 13.293297666089405
     }
   ],
-  "disclaimer": "DISCLAIMER: This offline rescheduling simulator calculates what-if model risk predictions based on historically observed schedule patterns. It does NOT prove causal delay reduction. Real-world flight rescheduling must account for aircraft tail rotations, airport slot constraints, gate availability, FAA ground delay programs, crew duty limitations, and passenger connections, none of which are modeled in this statistical analysis."
+  "disclaimer": "DISCLAIMER: These are offline model sensitivity predictions, not causal delay reductions. Aircraft rotations, airport slots, gates, crews, connections and reactions by other flights are not modeled. The original historical information set remains fixed. Timetable counts assume the source schedule is known at the decision time.",
+  "congestion_assumption": "One focal flight shifts against a fixed background timetable."
 }

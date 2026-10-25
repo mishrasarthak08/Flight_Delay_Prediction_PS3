@@ -12,6 +12,7 @@ from src.features import compute_schedule_and_calendar_features
 
 class MockModel:
     """Mock model predicting probability proportional to departure hour."""
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         # Predict higher delay for later departures (simulate evening congestion)
         return np.linspace(0.20, 0.40, len(X))
@@ -43,6 +44,14 @@ def test_rescheduling_simulator_duration_preservation_and_risk_diff():
     }
 
     df_sample = compute_schedule_and_calendar_features(pd.DataFrame([flight_dict]))
+    for col in [
+        "carrier_recent_delay_rate",
+        "origin_recent_delay_rate",
+        "route_recent_delay_rate",
+    ]:
+        df_sample[col] = 0.25
+    df_sample["origin_hour_scheduled_departures"] = 10
+    df_sample["origin_window_scheduled_departures"] = 30
     flight_row = df_sample.iloc[0]
 
     sim = ReschedulingSimulator(
@@ -93,9 +102,16 @@ def test_rescheduling_with_saved_xgboost_model():
         is_pytorch=predictor.is_pytorch,
     )
 
-    out = sim.simulate_shifts_for_flight(df_full.iloc[0], candidate_shifts=[-60, -30, 0, 30, 60])
+    out = sim.simulate_shifts_for_flight(
+        df_full.iloc[0], candidate_shifts=[-60, -30, 0, 30, 60]
+    )
     assert len(out["scenarios"]) == 5
-    assert out["baseline_delay_probability"] >= 0.0 and out["baseline_delay_probability"] <= 1.0
-    assert out["optimal_delay_probability"] >= 0.0 and out["optimal_delay_probability"] <= 1.0
+    assert (
+        out["baseline_delay_probability"] >= 0.0
+        and out["baseline_delay_probability"] <= 1.0
+    )
+    assert (
+        out["optimal_delay_probability"] >= 0.0
+        and out["optimal_delay_probability"] <= 1.0
+    )
     assert "DISCLAIMER" in out["disclaimer"]
-

@@ -8,7 +8,6 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Dict, Any
 
-
 # Base paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -21,13 +20,14 @@ FIGURES_DIR = RESULTS_DIR / "figures"
 PREDICTIONS_DIR = RESULTS_DIR / "predictions"
 REPORTS_DIR = RESULTS_DIR / "reports"
 DOCS_DIR = PROJECT_ROOT / "docs"
-HANDOFF_DIR = PROJECT_ROOT / "handoff_for_claude"
 
 # Operational Prediction Contract
 TARGET_COL: str = "is_delayed"
 RAW_TARGET_COL: str = "arr_delay"
 DELAY_THRESHOLD_MINUTES: float = 15.0
-PREDICTION_HORIZON_HOURS: float = 2.0  # Operating timestamp: 2 hours prior to scheduled departure
+PREDICTION_HORIZON_HOURS: float = (
+    2.0  # Operating timestamp: 2 hours prior to scheduled departure
+)
 
 # Centralized Feature Allowlist
 CATEGORICAL_FEATURES: List[str] = [
@@ -56,6 +56,8 @@ NUMERIC_SCHEDULE_FEATURES: List[str] = [
     "cos_day_of_week",
     "sin_month",
     "cos_month",
+    "origin_hour_scheduled_departures",
+    "origin_window_scheduled_departures",
 ]
 
 HISTORICAL_FEATURES: List[str] = [
@@ -67,9 +69,14 @@ HISTORICAL_FEATURES: List[str] = [
     "hist_origin_flight_count",
     "hist_dest_flight_count",
     "hist_route_flight_count",
+    "carrier_recent_delay_rate",
+    "origin_recent_delay_rate",
+    "route_recent_delay_rate",
 ]
 
-ALL_MODEL_FEATURES: List[str] = CATEGORICAL_FEATURES + NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
+ALL_MODEL_FEATURES: List[str] = (
+    CATEGORICAL_FEATURES + NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
+)
 
 # Explicit Forbidden Fields List (Leakage prevention)
 FORBIDDEN_COLUMNS: List[str] = [
@@ -104,8 +111,18 @@ FORBIDDEN_COLUMNS: List[str] = [
 # Schema alias mapping candidates for dataset harmonization
 SCHEMA_ALIASES: Dict[str, List[str]] = {
     "arr_delay": ["arr_delay", "ArrDelay", "ARR_DELAY", "ARRIVAL_DELAY"],
-    "sched_dep_time": ["sched_dep_time", "CRSDepTime", "SCHEDULED_DEPARTURE", "sched_dep"],
-    "sched_arr_time": ["sched_arr_time", "CRSArrTime", "SCHEDULED_ARRIVAL", "sched_arr"],
+    "sched_dep_time": [
+        "sched_dep_time",
+        "CRSDepTime",
+        "SCHEDULED_DEPARTURE",
+        "sched_dep",
+    ],
+    "sched_arr_time": [
+        "sched_arr_time",
+        "CRSArrTime",
+        "SCHEDULED_ARRIVAL",
+        "sched_arr",
+    ],
     "carrier": ["carrier", "UniqueCarrier", "AIRLINE", "OP_UNIQUE_CARRIER", "airline"],
     "origin": ["origin", "ORIGIN", "ORIGIN_AIRPORT", "origin_airport"],
     "dest": ["dest", "DEST", "DESTINATION_AIRPORT", "dest_airport"],
@@ -119,6 +136,7 @@ SCHEMA_ALIASES: Dict[str, List[str]] = {
 @dataclass
 class SplittingConfig:
     """Chronological split parameters."""
+
     train_ratio: float = 0.70
     val_ratio: float = 0.15
     test_ratio: float = 0.15
@@ -128,16 +146,19 @@ class SplittingConfig:
 @dataclass
 class SmoothingConfig:
     """Empirical Bayes smoothing pseudo-counts for historical delay rates."""
+
     carrier_m: float = 20.0
     origin_m: float = 20.0
     dest_m: float = 20.0
     route_m: float = 10.0
-    default_prior_delay_rate: float = 0.2447
+    default_prior_delay_rate: float = 0.25
+    recent_window_days: int = 7
 
 
 @dataclass
 class ModelHyperparams:
     """Hyperparameters for all model families."""
+
     # Logistic Regression
     lr_c: float = 0.1
     lr_max_iter: int = 1000
@@ -154,6 +175,8 @@ class ModelHyperparams:
     xgb_n_jobs: int = 2
     xgb_early_stopping_rounds: int = 15
     xgb_eval_metric: str = "logloss"
+    xgb_reg_lambda: float = 5.0
+    xgb_min_child_weight: float = 20.0
 
     # PyTorch Embedding MLP
     mlp_carrier_emb_dim: int = 16
@@ -171,6 +194,7 @@ class ModelHyperparams:
 @dataclass
 class EvaluationConfig:
     """Evaluation, operational thresholding, and calibration parameters."""
+
     target_precision: float = 0.70
     default_threshold: float = 0.50
     calibration_method: str = "isotonic"  # 'isotonic' or 'sigmoid' (Platt scaling)
@@ -179,6 +203,7 @@ class EvaluationConfig:
 @dataclass
 class PipelineConfig:
     """Master pipeline configuration."""
+
     raw_data_path: Path = RAW_DATA_PATH
     processed_data_dir: Path = PROCESSED_DATA_DIR
     models_dir: Path = MODELS_DIR

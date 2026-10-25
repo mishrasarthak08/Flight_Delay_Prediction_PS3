@@ -1,0 +1,2 @@
+# Keep final documents out of line-based diffs and newline conversion.
+*.pdf binary

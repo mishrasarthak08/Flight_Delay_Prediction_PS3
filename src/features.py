@@ -1,320 +1,307 @@
-"""
-Feature engineering module.
-Extracts cyclical schedule representations, calendar signals, and calculates
-leakage-safe empirical Bayes smoothed historical delay rates using ONLY strictly earlier dates.
+"""Schedule demand and historical outcomes available before each decision.
+
+Daily replay reads only outcomes released before local midnight. Estimator
+weights stay fixed. A frozen training-only reference is also supported.
 """
 
-from typing import Dict, Any, List, Tuple, Optional
+from dataclasses import asdict
 import numpy as np
 import pandas as pd
-
-from src.config import (
-    SmoothingConfig,
-    NUMERIC_SCHEDULE_FEATURES,
-    HISTORICAL_FEATURES,
-    CATEGORICAL_FEATURES,
-    TARGET_COL,
-)
+from src.config import SmoothingConfig, TARGET_COL
+from src.timeutils import hhmm_minutes, departure_timestamps
 
 
-def compute_schedule_and_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Computes scheduled departure and arrival time representations, cyclical transformations,
-    and calendar indicators using exclusively pre-departure scheduled information.
-    """
+def compute_schedule_and_calendar_features(df):
     df = df.copy()
-
-    # 1. Scheduled departure decomposition
-    # sched_dep_time is in HHMM format (e.g. 515 for 05:15, 1730 for 17:30)
-    sched_dep = df["sched_dep_time"].astype(int)
-    dep_hour = (sched_dep // 100) % 24
-    dep_min = sched_dep % 100
-    dep_min_of_day = dep_hour * 60 + dep_min
-
-    df["sched_dep_hour"] = dep_hour
-    df["sched_dep_min"] = dep_min
-    df["sched_dep_min_of_day"] = dep_min_of_day
-    # Cyclical encoding of departure time (24 * 60 = 1440 minutes in a day)
-    df["sin_sched_dep"] = np.sin(2.0 * np.pi * dep_min_of_day / 1440.0)
-    df["cos_sched_dep"] = np.cos(2.0 * np.pi * dep_min_of_day / 1440.0)
-
-    # 2. Scheduled arrival decomposition
-    sched_arr = df["sched_arr_time"].astype(int)
-    arr_hour = (sched_arr // 100) % 24
-    arr_min = sched_arr % 100
-    arr_min_of_day = arr_hour * 60 + arr_min
-
-    df["sched_arr_hour"] = arr_hour
-    df["sched_arr_min"] = arr_min
-    df["sched_arr_min_of_day"] = arr_min_of_day
-    # Cyclical encoding of arrival time
-    df["sin_sched_arr"] = np.sin(2.0 * np.pi * arr_min_of_day / 1440.0)
-    df["cos_sched_arr"] = np.cos(2.0 * np.pi * arr_min_of_day / 1440.0)
-
-    # 3. Calendar patterns from flight_date
-    if "flight_date" in df.columns:
-        dt = pd.to_datetime(df["flight_date"])
-        df["month"] = dt.dt.month
-        df["day"] = dt.dt.day
-        df["day_of_week"] = dt.dt.day_of_week
-        df["is_weekend"] = dt.dt.day_of_week.isin([5, 6]).astype(int)
-    else:
-        # Fallback to year/month/day columns if present
-        dt = pd.to_datetime(df[["year", "month", "day"]])
-        df["month"] = dt.dt.month
-        df["day"] = dt.dt.day
-        df["day_of_week"] = dt.dt.day_of_week
-        df["is_weekend"] = dt.dt.day_of_week.isin([5, 6]).astype(int)
-
-    # Cyclical day of week (7 days) and month (12 months)
-    df["sin_day_of_week"] = np.sin(2.0 * np.pi * df["day_of_week"] / 7.0)
-    df["cos_day_of_week"] = np.cos(2.0 * np.pi * df["day_of_week"] / 7.0)
-    df["sin_month"] = np.sin(2.0 * np.pi * (df["month"] - 1) / 12.0)
-    df["cos_month"] = np.cos(2.0 * np.pi * (df["month"] - 1) / 12.0)
-
-    # Route string
-    if "route" not in df.columns and "origin" in df.columns and "dest" in df.columns:
-        df["route"] = df["origin"] + "_" + df["dest"]
-
+    if "flight_date" not in df:
+        df["flight_date"] = pd.to_datetime(df[["year", "month", "day"]])
+    df["flight_date"] = pd.to_datetime(df["flight_date"], errors="raise").dt.normalize()
+    for col in ["carrier", "origin", "dest"]:
+        if df[col].isna().any() or df[col].astype(str).str.strip().eq("").any():
+            raise ValueError(f"{col} must contain nonempty identifiers.")
+        df[col] = df[col].astype(str).str.strip().str.upper()
+    distance = pd.to_numeric(df["distance"], errors="coerce")
+    if (~np.isfinite(distance) | (distance <= 0)).any():
+        raise ValueError("Distance must be a finite positive number of miles.")
+    df["distance"] = distance
+    for part in ["dep", "arr"]:
+        minutes = hhmm_minutes(df[f"sched_{part}_time"]) % 1440
+        df[f"sched_{part}_hour"], df[f"sched_{part}_min"] = minutes // 60, minutes % 60
+        df[f"sched_{part}_min_of_day"] = minutes
+        df[f"sin_sched_{part}"] = np.sin(2 * np.pi * minutes / 1440)
+        df[f"cos_sched_{part}"] = np.cos(2 * np.pi * minutes / 1440)
+    date = df["flight_date"]
+    df["month"], df["day"], df["day_of_week"] = (
+        date.dt.month,
+        date.dt.day,
+        date.dt.day_of_week,
+    )
+    df["is_weekend"] = date.dt.day_of_week.isin([5, 6]).astype(int)
+    for name, values, period in [
+        ("day_of_week", df["day_of_week"], 7),
+        ("month", df["month"] - 1, 12),
+    ]:
+        df[f"sin_{name}"] = np.sin(2 * np.pi * values / period)
+        df[f"cos_{name}"] = np.cos(2 * np.pi * values / period)
+    df["route"] = df["origin"] + "_" + df["dest"]
+    df["scheduled_departure_utc"] = departure_timestamps(df)
+    df["decision_time"] = df["scheduled_departure_utc"] - pd.Timedelta(hours=2)
     return df
 
 
-class HistoricalFeatureGenerator:
+class ScheduleContext:
+    """Static timetable counts, including flights with missing arrival outcomes.
+
+    Assumption: this source timetable is known at T-2h. It is not a versioned
+    historical schedule feed. Counts measure scheduled demand, not realized load.
     """
-    Computes leakage-safe empirical Bayes smoothed historical delay rates.
-    GUARANTEE: For any flight on calendar date D, historical aggregates are computed
-    STRICTLY from flights on dates d < D. Flights on date D or later never enter calculations.
-    """
 
-    def __init__(self, config: SmoothingConfig = SmoothingConfig()):
-        self.config = config
-        self.carrier_m = config.carrier_m
-        self.origin_m = config.origin_m
-        self.dest_m = config.dest_m
-        self.route_m = config.route_m
-        self.prior = config.default_prior_delay_rate
+    def __init__(self, counts=None, date_min=None, date_max=None):
+        self.counts = counts or {}
+        self.date_min, self.date_max = date_min, date_max
 
-        # Historical lookup state up to the end of training period (for inference & rescheduling)
-        self.latest_carrier_stats: Dict[str, Tuple[int, int]] = {}  # {carrier: (delayed_count, total_count)}
-        self.latest_origin_stats: Dict[str, Tuple[int, int]] = {}
-        self.latest_dest_stats: Dict[str, Tuple[int, int]] = {}
-        self.latest_route_stats: Dict[str, Tuple[int, int]] = {}
-        self.is_fitted = False
+    @staticmethod
+    def key(origin, timestamp):
+        return f"{origin}|{pd.Timestamp(timestamp).strftime('%Y-%m-%dT%H')}"
 
-    def fit_transform_chronological(
-        self,
-        df: pd.DataFrame,
-        date_col: str = "flight_date",
-        target_col: str = TARGET_COL,
-    ) -> pd.DataFrame:
-        """
-        Computes historical delay features sequentially across chronological dates.
-        For each date D:
-          - Looks up cumulative stats from all prior dates d < D.
-          - Computes smoothed rate: (prior_delays + m * prior) / (prior_flights + m)
-          - Assigns features to flights of date D.
-          - Updates cumulative stats by adding outcomes from date D for subsequent dates.
-        """
-        if target_col not in df.columns:
-            raise ValueError(f"Target column '{target_col}' required to fit historical delay stats.")
+    @classmethod
+    def from_roster(cls, roster):
+        dep = (
+            departure_timestamps(roster)
+            .dt.tz_convert("America/New_York")
+            .dt.tz_localize(None)
+            .dt.floor("h")
+        )
+        table = pd.DataFrame(
+            {"origin": roster["origin"].astype(str).str.upper(), "hour": dep}
+        )
+        counts = {
+            cls.key(o, t): int(n)
+            for (o, t), n in table.groupby(["origin", "hour"]).size().items()
+        }
+        return cls(counts, str(dep.min().date()), str(dep.max().date()))
 
-        df = df.copy()
-        df["_date"] = pd.to_datetime(df[date_col]).dt.date
-        unique_dates = sorted(df["_date"].unique())
+    def counts_for(self, origin, timestamp):
+        timestamp = pd.Timestamp(timestamp).floor("h")
+        hour = self.counts.get(self.key(origin, timestamp), 0)
+        window = sum(
+            self.counts.get(self.key(origin, timestamp + pd.Timedelta(hours=h)), 0)
+            for h in [-1, 0, 1]
+        )
+        return hour, window
 
-        # Cumulative trackers across history: {entity: [delayed_count, total_count]}
-        carrier_cum: Dict[str, List[int]] = {}
-        origin_cum: Dict[str, List[int]] = {}
-        dest_cum: Dict[str, List[int]] = {}
-        route_cum: Dict[str, List[int]] = {}
+    def transform(self, df):
+        result = df.copy()
+        local = (
+            result["scheduled_departure_utc"]
+            .dt.tz_convert("America/New_York")
+            .dt.tz_localize(None)
+        )
+        rows = [self.counts_for(o, t) for o, t in zip(result["origin"], local)]
+        result["origin_hour_scheduled_departures"] = [r[0] for r in rows]
+        result["origin_window_scheduled_departures"] = [r[1] for r in rows]
+        return result
 
-        # Arrays to populate
-        n_rows = len(df)
-        carrier_rate = np.zeros(n_rows, dtype=np.float32)
-        origin_rate = np.zeros(n_rows, dtype=np.float32)
-        dest_rate = np.zeros(n_rows, dtype=np.float32)
-        route_rate = np.zeros(n_rows, dtype=np.float32)
-
-        carrier_count = np.zeros(n_rows, dtype=np.float32)
-        origin_count = np.zeros(n_rows, dtype=np.float32)
-        dest_count = np.zeros(n_rows, dtype=np.float32)
-        route_count = np.zeros(n_rows, dtype=np.float32)
-
-        # Map date to row indices
-        date_groups = df.groupby("_date").indices
-
-        # Prior delay rate fallback
-        prior = self.prior
-
-        for d in unique_dates:
-            idxs = date_groups[d]
-            carriers = df["carrier"].iloc[idxs].values
-            origins = df["origin"].iloc[idxs].values
-            dests = df["dest"].iloc[idxs].values
-            routes = df["route"].iloc[idxs].values
-            targets = df[target_col].iloc[idxs].values
-
-            # 1. READ strictly prior cumulative counts for current date flights
-            for i, idx in enumerate(idxs):
-                c = carriers[i]
-                o = origins[i]
-                dst = dests[i]
-                r = routes[i]
-
-                # Carrier
-                c_del, c_tot = carrier_cum.get(c, [0, 0])
-                carrier_rate[idx] = (c_del + self.carrier_m * prior) / (c_tot + self.carrier_m)
-                carrier_count[idx] = c_tot
-
-                # Origin
-                o_del, o_tot = origin_cum.get(o, [0, 0])
-                origin_rate[idx] = (o_del + self.origin_m * prior) / (o_tot + self.origin_m)
-                origin_count[idx] = o_tot
-
-                # Dest
-                dst_del, dst_tot = dest_cum.get(dst, [0, 0])
-                dest_rate[idx] = (dst_del + self.dest_m * prior) / (dst_tot + self.dest_m)
-                dest_count[idx] = dst_tot
-
-                # Route
-                r_del, r_tot = route_cum.get(r, [0, 0])
-                route_rate[idx] = (r_del + self.route_m * prior) / (r_tot + self.route_m)
-                route_count[idx] = r_tot
-
-            # 2. UPDATE cumulative counts AFTER assigning features for date D
-            # This ensures date D outcomes are only available for future dates d' > D
-            for i in range(len(idxs)):
-                c = carriers[i]
-                o = origins[i]
-                dst = dests[i]
-                r = routes[i]
-                y = int(targets[i])
-
-                # Update carrier
-                c_entry = carrier_cum.setdefault(c, [0, 0])
-                c_entry[0] += y
-                c_entry[1] += 1
-
-                # Update origin
-                o_entry = origin_cum.setdefault(o, [0, 0])
-                o_entry[0] += y
-                o_entry[1] += 1
-
-                # Update dest
-                dst_entry = dest_cum.setdefault(dst, [0, 0])
-                dst_entry[0] += y
-                dst_entry[1] += 1
-
-                # Update route
-                r_entry = route_cum.setdefault(r, [0, 0])
-                r_entry[0] += y
-                r_entry[1] += 1
-
-        # Store latest stats for future inference / simulation
-        self.latest_carrier_stats = {k: (v[0], v[1]) for k, v in carrier_cum.items()}
-        self.latest_origin_stats = {k: (v[0], v[1]) for k, v in origin_cum.items()}
-        self.latest_dest_stats = {k: (v[0], v[1]) for k, v in dest_cum.items()}
-        self.latest_route_stats = {k: (v[0], v[1]) for k, v in route_cum.items()}
-        self.is_fitted = True
-
-        df["carrier_hist_delay_rate"] = carrier_rate
-        df["origin_hist_delay_rate"] = origin_rate
-        df["dest_hist_delay_rate"] = dest_rate
-        df["route_hist_delay_rate"] = route_rate
-
-        df["hist_carrier_flight_count"] = carrier_count
-        df["hist_origin_flight_count"] = origin_count
-        df["hist_dest_flight_count"] = dest_count
-        df["hist_route_flight_count"] = route_count
-
-        df = df.drop(columns=["_date"])
-        return df
-
-    def transform_inference(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Attaches historical delay features to an unlabelled inference or rescheduling DataFrame
-        using the fitted historical state. Unseen entities gracefully revert to the prior delay rate.
-        """
-        if not self.is_fitted:
-            raise RuntimeError("HistoricalFeatureGenerator must be fitted before calling transform_inference.")
-
-        df = df.copy()
-        n = len(df)
-        prior = self.prior
-
-        carrier_rate = np.zeros(n, dtype=np.float32)
-        origin_rate = np.zeros(n, dtype=np.float32)
-        dest_rate = np.zeros(n, dtype=np.float32)
-        route_rate = np.zeros(n, dtype=np.float32)
-
-        carrier_count = np.zeros(n, dtype=np.float32)
-        origin_count = np.zeros(n, dtype=np.float32)
-        dest_count = np.zeros(n, dtype=np.float32)
-        route_count = np.zeros(n, dtype=np.float32)
-
-        for i in range(n):
-            c = df["carrier"].iloc[i]
-            o = df["origin"].iloc[i]
-            dst = df["dest"].iloc[i]
-            r = df["route"].iloc[i] if "route" in df.columns else f"{o}_{dst}"
-
-            c_del, c_tot = self.latest_carrier_stats.get(c, (0, 0))
-            carrier_rate[i] = (c_del + self.carrier_m * prior) / (c_tot + self.carrier_m)
-            carrier_count[i] = c_tot
-
-            o_del, o_tot = self.latest_origin_stats.get(o, (0, 0))
-            origin_rate[i] = (o_del + self.origin_m * prior) / (o_tot + self.origin_m)
-            origin_count[i] = o_tot
-
-            dst_del, dst_tot = self.latest_dest_stats.get(dst, (0, 0))
-            dest_rate[i] = (dst_del + self.dest_m * prior) / (dst_tot + self.dest_m)
-            dest_count[i] = dst_tot
-
-            r_del, r_tot = self.latest_route_stats.get(r, (0, 0))
-            route_rate[i] = (r_del + self.route_m * prior) / (r_tot + self.route_m)
-            route_count[i] = r_tot
-
-        df["carrier_hist_delay_rate"] = carrier_rate
-        df["origin_hist_delay_rate"] = origin_rate
-        df["dest_hist_delay_rate"] = dest_rate
-        df["route_hist_delay_rate"] = route_rate
-
-        df["hist_carrier_flight_count"] = carrier_count
-        df["hist_origin_flight_count"] = origin_count
-        df["hist_dest_flight_count"] = dest_count
-        df["hist_route_flight_count"] = route_count
-
-        return df
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serializes fitted historical stats for checkpointing."""
+    def to_dict(self):
         return {
-            "is_fitted": self.is_fitted,
-            "carrier_m": self.carrier_m,
-            "origin_m": self.origin_m,
-            "dest_m": self.dest_m,
-            "route_m": self.route_m,
-            "prior": self.prior,
-            "latest_carrier_stats": self.latest_carrier_stats,
-            "latest_origin_stats": self.latest_origin_stats,
-            "latest_dest_stats": self.latest_dest_stats,
-            "latest_route_stats": self.latest_route_stats,
+            "counts": self.counts,
+            "date_min": self.date_min,
+            "date_max": self.date_max,
+            "assumption": "Static source timetable known at T-2h; counts include missing outcomes.",
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "HistoricalFeatureGenerator":
-        """Reconstructs generator from dictionary."""
-        config = SmoothingConfig(
-            carrier_m=data["carrier_m"],
-            origin_m=data["origin_m"],
-            dest_m=data["dest_m"],
-            route_m=data["route_m"],
-            default_prior_delay_rate=data["prior"],
+    def from_dict(cls, data):
+        return cls(data["counts"], data["date_min"], data["date_max"])
+
+
+class HistoricalFeatureGenerator:
+    """Timestamp-filtered history with a fixed Beta(1,3) cold start.
+
+    Global smoothing uses only previously available labels. Persisted frozen
+    snapshots reject prediction times earlier than their state cutoff.
+    """
+
+    groups = ["carrier", "origin", "dest", "route"]
+
+    def __init__(self, config=None):
+        self.config = config or SmoothingConfig()
+        self.prior = self.config.default_prior_delay_rate
+        for group in self.groups:
+            setattr(self, f"{group}_m", getattr(self.config, f"{group}_m"))
+            setattr(self, f"latest_{group}_stats", {})
+        self.is_fitted, self.state_cutoff, self.recent_stats = False, None, {}
+        self.history_policy = "frozen"
+
+    def enable_rolling(self):
+        """Replay daily snapshots using only outcomes released before local midnight."""
+        self.history_policy = "daily_available_outcomes"
+        return self
+
+    def fit(self, df, date_col="flight_date", target_col=TARGET_COL):
+        if target_col not in df:
+            raise ValueError(f"Target column {target_col!r} is required.")
+        self.source = df.copy()
+        if "label_available_at" not in self.source:
+            # Synthetic fixtures. The real pipeline supplies audited arrival times.
+            self.source["label_available_at"] = pd.to_datetime(
+                self.source[date_col], utc=True
+            ) + pd.Timedelta(days=1)
+        self.source["label_available_at"] = pd.to_datetime(
+            self.source["label_available_at"], utc=True
         )
-        gen = cls(config)
-        gen.is_fitted = data["is_fitted"]
-        gen.latest_carrier_stats = {k: tuple(v) for k, v in data["latest_carrier_stats"].items()}
-        gen.latest_origin_stats = {k: tuple(v) for k, v in data["latest_origin_stats"].items()}
-        gen.latest_dest_stats = {k: tuple(v) for k, v in data["latest_dest_stats"].items()}
-        gen.latest_route_stats = {k: tuple(v) for k, v in data["latest_route_stats"].items()}
+        self.source = self.source[self.source["label_available_at"].notna()].copy()
+        self.target_col, self.is_fitted = target_col, True
+        self.freeze(
+            self.source["label_available_at"].max() + pd.Timedelta(nanoseconds=1)
+        )
+        return self
+
+    def _queries(self, df):
+        col = "decision_time" if "decision_time" in df else "flight_date"
+        timestamps = pd.to_datetime(df[col], utc=True)
+        if self.history_policy == "daily_available_outcomes":
+            timestamps = (
+                timestamps.dt.tz_convert("America/New_York")
+                .dt.normalize()
+                .dt.tz_convert("UTC")
+            )
+        return timestamps.astype("int64").to_numpy()
+
+    @staticmethod
+    def _lookup(events, queries, target):
+        events = events.sort_values("label_available_at", kind="stable")
+        times = events["label_available_at"].astype("int64").to_numpy()
+        cumulative = np.r_[0.0, events[target].to_numpy(dtype=float).cumsum()]
+        indices = np.searchsorted(times, queries, side="left")
+        return cumulative[indices], indices.astype(float)
+
+    def transform_expanding(self, df):
+        if not self.is_fitted or not hasattr(self, "source"):
+            raise RuntimeError("Fit historical events before expanding transformation.")
+        result, queries = df.copy(), self._queries(df)
+        gd, gn = self._lookup(self.source, queries, self.target_col)
+        prior = (gd + 4 * self.prior) / (gn + 4)
+        lookback = int(pd.Timedelta(days=self.config.recent_window_days).value)
+        for group in self.groups:
+            m = getattr(self, f"{group}_m")
+            delays, n = np.zeros(len(result)), np.zeros(len(result))
+            recent_delays, recent_n = np.zeros(len(result)), np.zeros(len(result))
+            events_by_key = dict(tuple(self.source.groupby(group)))
+            for key, pos in result.groupby(group).indices.items():
+                events = events_by_key.get(key)
+                if events is None:
+                    continue
+                delays[pos], n[pos] = self._lookup(
+                    events, queries[pos], self.target_col
+                )
+                old_d, old_n = self._lookup(
+                    events, queries[pos] - lookback, self.target_col
+                )
+                recent_delays[pos], recent_n[pos] = delays[pos] - old_d, n[pos] - old_n
+            result[f"{group}_hist_delay_rate"] = (delays + m * prior) / (n + m)
+            result[f"hist_{group}_flight_count"] = n
+            if group in ["carrier", "origin", "route"]:
+                result[f"{group}_recent_delay_rate"] = (recent_delays + m * prior) / (
+                    recent_n + m
+                )
+        return result
+
+    def fit_transform_chronological(
+        self, df, date_col="flight_date", target_col=TARGET_COL
+    ):
+        return self.fit(df, date_col, target_col).transform_expanding(df)
+
+    def freeze(self, cutoff):
+        cutoff = pd.Timestamp(cutoff)
+        cutoff = (
+            cutoff.tz_localize("UTC")
+            if cutoff.tzinfo is None
+            else cutoff.tz_convert("UTC")
+        )
+        observed = self.source[self.source["label_available_at"] < cutoff]
+        self.frozen_prior = float(
+            (observed[self.target_col].sum() + 4 * self.prior) / (len(observed) + 4)
+        )
+        self.state_cutoff = cutoff.isoformat()
+        recent = observed[
+            observed["label_available_at"]
+            >= cutoff - pd.Timedelta(days=self.config.recent_window_days)
+        ]
+        for group in self.groups:
+            stats = observed.groupby(group)[self.target_col].agg(["sum", "count"])
+            setattr(
+                self,
+                f"latest_{group}_stats",
+                {str(k): (int(r["sum"]), int(r["count"])) for k, r in stats.iterrows()},
+            )
+            stats = recent.groupby(group)[self.target_col].agg(["sum", "count"])
+            self.recent_stats[group] = {
+                str(k): (int(r["sum"]), int(r["count"])) for k, r in stats.iterrows()
+            }
+        return self
+
+    def transform_inference(self, df):
+        if not self.is_fitted:
+            raise RuntimeError(
+                "HistoricalFeatureGenerator must be fitted before inference."
+            )
+        if self.history_policy == "daily_available_outcomes":
+            if not hasattr(self, "source"):
+                raise RuntimeError(
+                    "Daily replay requires the saved historical_events.parquet store."
+                )
+            return self.transform_expanding(df)
+        if (
+            self.state_cutoff is not None
+            and (self._queries(df) < pd.Timestamp(self.state_cutoff).value).any()
+        ):
+            raise ValueError(
+                "Prediction precedes the saved historical-state cutoff. Use a historical snapshot."
+            )
+        result, prior = df.copy(), getattr(self, "frozen_prior", self.prior)
+        for group in self.groups:
+            m, stats = getattr(self, f"{group}_m"), getattr(
+                self, f"latest_{group}_stats"
+            )
+            values = [stats.get(str(key), (0, 0)) for key in result[group]]
+            result[f"{group}_hist_delay_rate"] = [
+                (d + m * prior) / (n + m) for d, n in values
+            ]
+            result[f"hist_{group}_flight_count"] = [n for _, n in values]
+            if group in ["carrier", "origin", "route"]:
+                recent = self.recent_stats.get(group, {})
+                values = [recent.get(str(key), (0, 0)) for key in result[group]]
+                result[f"{group}_recent_delay_rate"] = [
+                    (d + m * prior) / (n + m) for d, n in values
+                ]
+        return result
+
+    def to_dict(self):
+        return {
+            "schema_version": 2,
+            "is_fitted": self.is_fitted,
+            "history_policy": self.history_policy,
+            "config": asdict(self.config),
+            "state_cutoff": self.state_cutoff,
+            "frozen_prior": getattr(self, "frozen_prior", self.prior),
+            "recent_stats": self.recent_stats,
+            **{
+                f"latest_{g}_stats": getattr(self, f"latest_{g}_stats")
+                for g in self.groups
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        if data.get("schema_version") != 2:
+            raise ValueError(
+                "Historical artifact predates the corrected protocol. Rerun the pipeline."
+            )
+        gen = cls(SmoothingConfig(**data["config"]))
+        gen.is_fitted, gen.state_cutoff = data["is_fitted"], data["state_cutoff"]
+        gen.history_policy = data.get("history_policy", "frozen")
+        gen.frozen_prior, gen.recent_stats = data["frozen_prior"], data["recent_stats"]
+        for group in gen.groups:
+            setattr(gen, f"latest_{group}_stats", data[f"latest_{group}_stats"])
         return gen

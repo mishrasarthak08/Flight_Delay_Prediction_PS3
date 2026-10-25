@@ -1,55 +1,55 @@
-"""
-End-to-End Flight Delay Prediction Pipeline.
-Executes data ingestion, schema discovery, chronological splitting,
-leakage-safe historical feature engineering, model training (LR, XGB, PyTorch MLP),
-validation-based calibration & thresholding, test evaluation, rescheduling simulation,
-and reporting.
-"""
+"""Reproduce the Phase 1 ML experiment, with disjoint temporal decisions."""
 
 import os
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-from typing import Dict, Any, List, Tuple
-from pathlib import Path
-import sys
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 import argparse
+from dataclasses import asdict
+import hashlib
+import importlib.metadata
 import json
-import pickle
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import pandas as pd
 import torch
-
-# Ensure project root is on sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+from sklearn.metrics import average_precision_score, brier_score_loss
 from src.config import (
     RAW_DATA_PATH,
     RESULTS_DIR,
     MODELS_DIR,
-    METRICS_DIR,
-    FIGURES_DIR,
-    PREDICTIONS_DIR,
-    REPORTS_DIR,
-    TARGET_COL,
-    CATEGORICAL_FEATURES,
-    NUMERIC_SCHEDULE_FEATURES,
-    HISTORICAL_FEATURES,
     ALL_MODEL_FEATURES,
-    SplittingConfig,
-    SmoothingConfig,
     ModelHyperparams,
-    EvaluationConfig,
-    PipelineConfig,
 )
-from src.data import load_raw_dataset, clean_and_prepare_dataset
-from src.splitting import chronological_date_split, save_split_manifest
-from src.features import compute_schedule_and_calendar_features, HistoricalFeatureGenerator
-from src.validation import audit_feature_matrix_for_forbidden_columns, verify_no_future_leakage_in_splits
+from src.data import (
+    load_raw_dataset,
+    clean_and_prepare_dataset,
+    attach_label_availability,
+)
+from src.features import compute_schedule_and_calendar_features, ScheduleContext
+from src.splitting import chronological_date_split
+from src.experiments import (
+    prepare_partitions,
+    temporal_search,
+    development_blocks,
+    choose_calibrator,
+    ablation_study,
+    day_block_intervals,
+    forward_feature_selection,
+)
 from src.train import train_logistic_regression, train_xgboost, train_pytorch_mlp
-from src.calibration import ModelCalibrator, select_operational_threshold
-from src.evaluate import evaluate_predictions, save_test_predictions, create_model_comparison_table
-from src.reschedule import ReschedulingSimulator
+from src.preprocessing import FlightTabularPreprocessor
+from src.calibration import select_operational_threshold
+from src.evaluate import (
+    evaluate_predictions,
+    save_test_predictions,
+    create_model_comparison_table,
+)
+from src.validation import audit_feature_matrix_for_forbidden_columns
 from src.plotting import (
     plot_roc_curves,
     plot_pr_curves,
@@ -58,284 +58,435 @@ from src.plotting import (
     plot_feature_importances,
     plot_delay_eda,
 )
+from src.reschedule import ReschedulingSimulator
 
 
-def json_serial(obj):
-    """JSON serializer for objects not serializable by default json code."""
-    if isinstance(obj, (np.integer, np.int64, np.int32)):
-        return int(obj)
-    if isinstance(obj, (np.floating, np.float64, np.float32)):
-        return float(obj)
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    return str(obj)
+def save_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            value,
+            indent=2,
+            default=lambda x: x.item() if isinstance(x, np.generic) else str(x),
+        )
+        + "\n"
+    )
 
 
 def run_pipeline(
-    data_path: Path = RAW_DATA_PATH,
-    results_dir: Path = RESULTS_DIR,
-    models_dir: Path = MODELS_DIR,
-    random_seed: int = 42,
-    target_precision: float = 0.70,
-    mlp_epochs: int = 15,
-) -> Dict[str, Any]:
-    print("=" * 80)
-    print("STARTING FLIGHT DELAY PREDICTION PIPELINE")
-    print(f"Data Path: {data_path}")
-    print(f"Results Directory: {results_dir}")
-    print(f"Models Directory: {models_dir}")
-    print(f"Random Seed: {random_seed}")
-    print("=" * 80)
-
-    # 1. Ingestion & Schema Discovery
-    print("\n[Stage 1/8] Ingesting and Auditing Dataset...")
-    df_raw = load_raw_dataset(data_path)
-    df_clean, audit_stats = clean_and_prepare_dataset(df_raw)
-    reports_dir = results_dir / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    with open(reports_dir / "dataset_profile.json", "w") as f:
-        json.dump(audit_stats, f, indent=2)
-    print(f"Dataset profile saved. Operated flights: {len(df_clean):,}, Delay rate: {audit_stats['positive_class_prevalence']:.4f}")
-
-    # 2. Schedule and Calendar Feature Engineering
-    print("\n[Stage 2/8] Computing Pre-Departure Schedule and Cyclical Features...")
-    df_features = compute_schedule_and_calendar_features(df_clean)
-
-    # 3. Chronological Date-Based Splitting
-    print("\n[Stage 3/8] Chronological Date Splitting (70% Train, 15% Val, 15% Test)...")
-    split_cfg = SplittingConfig(random_seed=random_seed)
-    train_df, val_df, test_df, split_manifest = chronological_date_split(df_features, config=split_cfg)
-    save_split_manifest(split_manifest, reports_dir / "split_manifest.json")
-    print(f"Train: {split_manifest['train']['start_date']} to {split_manifest['train']['end_date']} ({split_manifest['train']['row_count']:,} flights, prev={split_manifest['train']['positive_prevalence']:.4f})")
-    print(f"Val:   {split_manifest['validation']['start_date']} to {split_manifest['validation']['end_date']} ({split_manifest['validation']['row_count']:,} flights, prev={split_manifest['validation']['positive_prevalence']:.4f})")
-    print(f"Test:  {split_manifest['test']['start_date']} to {split_manifest['test']['end_date']} ({split_manifest['test']['row_count']:,} flights, prev={split_manifest['test']['positive_prevalence']:.4f})")
-
-    # Verify split boundaries
-    verify_no_future_leakage_in_splits(train_df["flight_date"], val_df["flight_date"], test_df["flight_date"])
-
-    # 4. Leakage-Safe Past-Only Empirical Bayes Historical Rates
-    print("\n[Stage 4/8] Generating Leakage-Safe Historical Delay Rates (Past-Only Dates)...")
-    # Fit historical generator across chronological dates of training data
-    smoothing_cfg = SmoothingConfig(default_prior_delay_rate=split_manifest["train"]["positive_prevalence"])
-    hist_gen = HistoricalFeatureGenerator(config=smoothing_cfg)
-
-    # In sequential deployment simulation:
-    # Train dates get historical stats strictly from earlier train dates d < D
-    train_feat = hist_gen.fit_transform_chronological(train_df, date_col="flight_date", target_col=TARGET_COL)
-
-    # Save historical generator state up through end of training
-    models_dir.mkdir(parents=True, exist_ok=True)
-    with open(models_dir / "historical_generator.json", "w") as f:
-        json.dump(hist_gen.to_dict(), f, indent=2)
-
-    # Sequential forward simulation for Val and Test:
-    # Each date uses historical statistics accumulated strictly up to the day before that date!
-    # Concatenate val and test sequentially to continue the forward simulation without self-date leakage
-    val_feat = hist_gen.fit_transform_chronological(val_df, date_col="flight_date", target_col=TARGET_COL)
-    test_feat = hist_gen.fit_transform_chronological(test_df, date_col="flight_date", target_col=TARGET_COL)
-
-    # 5. Feature Audit (Leakage Verification)
-    print("\n[Stage 5/8] Auditing Feature Matrices for Forbidden Post-Flight Columns...")
-    all_features = CATEGORICAL_FEATURES + NUMERIC_SCHEDULE_FEATURES + HISTORICAL_FEATURES
-    audit_feature_matrix_for_forbidden_columns(train_feat[all_features].columns, strict=True)
-    audit_feature_matrix_for_forbidden_columns(val_feat[all_features].columns, strict=True)
-    audit_feature_matrix_for_forbidden_columns(test_feat[all_features].columns, strict=True)
-    print("Zero leakage verified: No forbidden outcome columns present in model feature sets.")
-
-    # 6. Model Training
-    print("\n[Stage 6/8] Training Models on Training Partition...")
-    hparams = ModelHyperparams(mlp_epochs=mlp_epochs)
-
-    # Model A: Logistic Regression
-    print("  -> Training Model A: Logistic Regression Pipeline...")
-    lr_model, tabular_prep, lr_train_probs, lr_val_probs = train_logistic_regression(
-        train_feat, val_feat, hyperparams=hparams, random_seed=random_seed, output_dir=models_dir
+    data_path=RAW_DATA_PATH,
+    results_dir=RESULTS_DIR,
+    models_dir=MODELS_DIR,
+    random_seed=42,
+    target_precision=0.70,
+    mlp_epochs=15,
+    include_mlp=True,
+    bootstrap_repeats=200,
+):
+    started = time.time()
+    results_dir, models_dir, data_path = (
+        Path(results_dir),
+        Path(models_dir),
+        Path(data_path),
     )
-
-    # Model B: XGBoost
-    print("  -> Training Model B: XGBoost Classifier...")
-    xgb_model, xgb_train_probs, xgb_val_probs = train_xgboost(
-        train_feat, val_feat, tabular_prep, hyperparams=hparams, random_seed=random_seed, output_dir=models_dir
+    reports, metrics_dir, figures, predictions = [
+        results_dir / x for x in ["reports", "metrics", "figures", "predictions"]
+    ]
+    for directory in [reports, metrics_dir, figures, predictions, models_dir]:
+        directory.mkdir(parents=True, exist_ok=True)
+    print("Loading original dataset and auditing outcome availability...", flush=True)
+    raw = load_raw_dataset(data_path)
+    clean, audit = clean_and_prepare_dataset(raw)
+    roster = raw.copy()
+    roster["flight_date"] = pd.to_datetime(roster[["year", "month", "day"]])
+    context = ScheduleContext.from_roster(roster)
+    features = context.transform(compute_schedule_and_calendar_features(clean))
+    features, availability = attach_label_availability(features)
+    audit["historical_label_availability"] = availability
+    audit["dataset_sha256"] = hashlib.sha256(data_path.read_bytes()).hexdigest()
+    audit["source_url"] = "https://www.kaggle.com/datasets/matinsajadi/flights"
+    audit["schedule_roster_rows"] = len(roster)
+    save_json(reports / "dataset_profile.json", audit)
+    train, validation, test, manifest = chronological_date_split(features)
+    print(
+        "Selecting features and hyperparameters on four training-only date folds...",
+        flush=True,
     )
-
-    # Model C: PyTorch Embedding MLP
-    print("  -> Training Model C: PyTorch Categorical Embedding MLP...")
-    device = torch.device("cpu")
-    print(f"     (Using compute device: {device})")
-    mlp_model, pytorch_prep, mlp_train_probs, mlp_val_probs = train_pytorch_mlp(
-        train_feat, val_feat, hyperparams=hparams, random_seed=random_seed, device=device, output_dir=models_dir
+    hyperparams, search = temporal_search(train, random_seed)
+    save_json(reports / "temporal_search.json", search)
+    fitted, _, history, purge = prepare_partitions(train, validation, rolling=True)
+    # This is a historical event database, not a fitted predictor. Future events
+    # remain invisible to all earlier queries through strict availability filters.
+    history.fit(features)
+    history.freeze(pd.Timestamp(purge["fit_available_at"]))
+    fitted = history.transform_expanding(fitted)
+    validation_feat = history.transform_inference(validation)
+    test_feat = history.transform_inference(test)
+    manifest["model_fit"] = purge
+    manifest["history_policy"] = (
+        "Daily local-midnight snapshots of outcomes available after actual arrival plus 24h. Identical historical replay for training, development, test and inference. Estimator weights stay fixed."
     )
-
-    # 7. Validation Calibration & Threshold Selection
-    print("\n[Stage 7/8] Fitting Calibration and Selecting Operational Decision Thresholds on Validation Data...")
-    y_val = val_df[TARGET_COL].values
-    y_test = test_df[TARGET_COL].values
-
-    models = {
-        "Logistic Regression": {
-            "model": lr_model,
-            "val_probs": lr_val_probs,
-            "test_feat": tabular_prep.transform(test_feat[all_features]),
-            "is_pytorch": False,
-            "save_name": "logistic_regression",
-        },
-        "XGBoost": {
-            "model": xgb_model,
-            "val_probs": xgb_val_probs,
-            "test_feat": tabular_prep.transform(test_feat[all_features]),
-            "is_pytorch": False,
-            "save_name": "xgboost",
-        },
-        "PyTorch Embedding MLP": {
-            "model": mlp_model,
-            "val_probs": mlp_val_probs,
-            "test_feat": test_feat[all_features],
-            "is_pytorch": True,
-            "save_name": "pytorch_mlp",
-        },
+    blocks, block_manifest = development_blocks(validation_feat, test_feat)
+    print(
+        "Selecting the final feature family on the forward pipeline-selection block...",
+        flush=True,
+    )
+    hyperparams, numeric_sets, feature_sets, forward_records = (
+        forward_feature_selection(
+            fitted, blocks["calibration_selection"], search, random_seed
+        )
+    )
+    search["training_cv_feature_winners"] = search["selected_feature_sets"]
+    search["selected_feature_sets"], search["selected_numeric_features"] = (
+        feature_sets,
+        numeric_sets,
+    )
+    search["selected_hyperparameters"] = {k: asdict(v) for k, v in hyperparams.items()}
+    search["forward_pipeline_selection"] = forward_records
+    save_json(reports / "temporal_search.json", search)
+    manifest["development_blocks"] = block_manifest
+    save_json(reports / "split_manifest.json", manifest)
+    save_json(models_dir / "historical_generator.json", history.to_dict())
+    event_columns = [
+        "label_available_at",
+        "is_delayed",
+        "carrier",
+        "origin",
+        "dest",
+        "route",
+    ]
+    history.source[event_columns].sort_values("label_available_at").to_parquet(
+        models_dir / "historical_events.parquet", index=False
+    )
+    save_json(models_dir / "schedule_context.json", context.to_dict())
+    for frame in [fitted, validation_feat, test_feat]:
+        audit_feature_matrix_for_forbidden_columns(frame[ALL_MODEL_FEATURES].columns)
+    cal_fit = blocks["calibration_fit"]
+    print(
+        "Fitting final models with training labels available at the model cutoff...",
+        flush=True,
+    )
+    lr, prep, lr_train, _ = train_logistic_regression(
+        fitted,
+        cal_fit,
+        hyperparams["logistic_regression"],
+        random_seed,
+        models_dir,
+        numeric_features=search["selected_numeric_features"]["logistic_regression"],
+    )
+    xgb_prep = FlightTabularPreprocessor(
+        numeric_features=search["selected_numeric_features"]["xgboost"]
+    ).fit(fitted[ALL_MODEL_FEATURES])
+    xgb_prep.save(models_dir / "xgboost_preprocessor.pkl")
+    xgb, xgb_train, _ = train_xgboost(
+        fitted, cal_fit, xgb_prep, hyperparams["xgboost"], random_seed, models_dir
+    )
+    model_infos = [
+        ("logistic_regression", "Logistic Regression", lr, prep, lr_train, False),
+        ("xgboost", "XGBoost", xgb, xgb_prep, xgb_train, False),
+    ]
+    if include_mlp:
+        # Supplementary model only. Fixed epochs, no calibration-label checkpoint selection.
+        hp = ModelHyperparams(mlp_epochs=mlp_epochs)
+        mlp, mp, mt, _ = train_pytorch_mlp(
+            fitted,
+            cal_fit,
+            hp,
+            random_seed,
+            torch.device("cpu"),
+            models_dir,
+            select_checkpoint=False,
+            numeric_features=search["selected_numeric_features"]["xgboost"],
+        )
+        model_infos.append(("pytorch_mlp", "PyTorch Embedding MLP", mlp, mp, mt, True))
+    elif any(models_dir.glob("pytorch_mlp*")):
+        raise ValueError(
+            "Existing MLP artifacts would become stale. Include MLP or use a fresh models directory."
+        )
+    all_metrics, probability_sets, prediction_frames, calibration_records = (
+        [],
+        {},
+        {},
+        {},
+    )
+    policy_cutoff = test_feat.decision_time.min().isoformat()
+    bundle = {
+        "schema_version": 2,
+        "policy_available_at": policy_cutoff,
+        "history_cutoff": history.state_cutoff,
+        "history_policy": history.history_policy,
+        "schedule_date_min": context.date_min,
+        "schedule_date_max": context.date_max,
+        "supported_models": [x[0] for x in model_infos],
+        "feature_names": ALL_MODEL_FEATURES,
+        "selected_numeric_features": search["selected_numeric_features"],
+        "selected_feature_sets": search["selected_feature_sets"],
+        "prediction_horizon_hours": 2,
+        "historical_reporting_lag_hours": 24,
+        "supplementary_models": ["pytorch_mlp"] if include_mlp else [],
     }
+    save_json(models_dir / "bundle_metadata.json", bundle)
 
-    all_metrics: List[Dict[str, Any]] = []
-    test_prob_dict: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
-    predictions_dir = results_dir / "predictions"
-    predictions_dir.mkdir(parents=True, exist_ok=True)
-    record_ids = test_df["id"] if "id" in test_df else pd.Series(range(len(test_df)))
+    def probabilities(model, preprocessor, frame, pytorch):
+        if pytorch:
+            c, n, _ = preprocessor.transform(frame[ALL_MODEL_FEATURES])
+            return model.predict_proba(c, n)
+        return model.predict_proba(preprocessor.transform(frame[ALL_MODEL_FEATURES]))
 
-    for name, info in models.items():
-        val_p = info["val_probs"]
-        sname = info["save_name"]
-
-        # Select operating threshold on validation predictions
-        thresh_info = select_operational_threshold(val_p, y_val, target_precision=target_precision)
-        op_thresh = thresh_info["selected_threshold"]
-
-        # Save threshold info
-        with open(models_dir / f"{sname}_threshold.json", "w") as f:
-            json.dump(thresh_info, f, indent=2)
-
-        # Fit probability calibrator on validation predictions
-        calibrator = ModelCalibrator(method="isotonic")
-        calibrator.fit(val_p, y_val)
-        calibrator.save(models_dir / f"{sname}_calibrator.pkl")
-
-        # Untouched Chronological Test Set Predictions
-        if info["is_pytorch"]:
-            c_test, n_test, _ = pytorch_prep.transform(info["test_feat"])
-            test_probs_raw = mlp_model.predict_proba(c_test, n_test, device=torch.device("cpu"))
-        else:
-            test_probs_raw = info["model"].predict_proba(info["test_feat"])
-
-        test_probs_calibrated = calibrator.predict_proba(test_probs_raw)
-        test_prob_dict[name] = (test_probs_raw, test_probs_calibrated)
-
-        # Evaluate on test set
-        metrics = evaluate_predictions(
-            y_true=y_test,
-            y_prob_raw=test_probs_raw,
-            y_prob_calibrated=test_probs_calibrated,
-            operational_threshold=op_thresh,
-            model_name=name,
-            split_name="test",
+    for key, name, model, preprocessor, train_probs, is_pytorch in model_infos:
+        pfit = probabilities(model, preprocessor, cal_fit, is_pytorch)
+        selection = blocks["calibration_selection"]
+        pselect = probabilities(model, preprocessor, selection, is_pytorch)
+        calibrator, cal_info = choose_calibrator(
+            pfit, cal_fit.is_delayed, pselect, selection.is_delayed
         )
-        metrics["threshold_selection_metadata"] = thresh_info
-        all_metrics.append(metrics)
-
-        # Save predictions artifact
-        y_pred_op = (test_probs_calibrated >= op_thresh).astype(int)
+        calibrator.save(models_dir / f"{key}_calibrator.pkl")
+        calibration_records[key] = cal_info
+        threshold_frame = blocks["threshold_validation"]
+        threshold_probs = calibrator.predict_proba(
+            probabilities(model, preprocessor, threshold_frame, is_pytorch)
+        )
+        threshold_info = select_operational_threshold(
+            threshold_probs, threshold_frame.is_delayed.to_numpy(), target_precision
+        )
+        threshold_info.update(
+            {
+                "calibration_method": calibrator.method,
+                "policy_available_at": policy_cutoff,
+            }
+        )
+        save_json(models_dir / f"{key}_threshold.json", threshold_info)
+        for block_name, block in blocks.items():
+            raw_probs = probabilities(model, preprocessor, block, is_pytorch)
+            pd.DataFrame(
+                {
+                    "record_id": block["id"],
+                    "flight_date": block.flight_date,
+                    "y_true": block.is_delayed,
+                    "prob_raw": raw_probs,
+                    "prob_calibrated": calibrator.predict_proba(raw_probs),
+                }
+            ).to_csv(predictions / f"{key}_{block_name}_predictions.csv", index=False)
+        raw_probs = probabilities(model, preprocessor, test_feat, is_pytorch)
+        cal_probs = calibrator.predict_proba(raw_probs)
+        result = evaluate_predictions(
+            test_feat.is_delayed,
+            raw_probs,
+            cal_probs,
+            threshold_info["selected_threshold"],
+            name,
+        )
+        result["threshold_selection_metadata"], result["calibration_selection"] = (
+            threshold_info,
+            cal_info,
+        )
+        result["training_average_precision"] = float(
+            average_precision_score(fitted.is_delayed, train_probs)
+        )
+        result["confidence_intervals_95_day_block"] = day_block_intervals(
+            test_feat.is_delayed,
+            raw_probs,
+            test_feat.flight_date,
+            random_seed,
+            bootstrap_repeats,
+            brier_probabilities=cal_probs,
+        )
+        result["interval_score_scale"] = (
+            "raw_ranking_metrics_and_selected_probability_brier"
+        )
+        result["supplementary"] = is_pytorch
+        all_metrics.append(result)
+        probability_sets[name] = (raw_probs, cal_probs)
+        filename = predictions / f"{key}_test_predictions.csv"
         save_test_predictions(
-            record_ids=record_ids,
-            y_true=y_test,
-            y_prob_raw=test_probs_raw,
-            y_prob_calibrated=test_probs_calibrated,
-            y_pred_op=y_pred_op,
-            output_path=predictions_dir / f"{sname}_test_predictions.csv",
+            test_feat["id"],
+            test_feat.is_delayed.to_numpy(),
+            raw_probs,
+            cal_probs,
+            (cal_probs >= threshold_info["selected_threshold"]).astype(int),
+            filename,
         )
-
-        print(f"  [{name}] PR-AUC: {metrics['pr_auc']:.4f} | ROC-AUC: {metrics['roc_auc']:.4f} | Brier: {metrics['brier_score_calibrated']:.4f} | Op Threshold: {op_thresh:.3f} | Recall@OpThresh: {metrics['recall_at_op_threshold']:.4f}")
-
-    # Save model comparison table
-    metrics_dir = results_dir / "metrics"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-    comparison_df = create_model_comparison_table(all_metrics)
-    comparison_df.to_csv(metrics_dir / "model_comparison.csv", index=False)
-    with open(metrics_dir / "evaluation_metrics.json", "w") as f:
-        json.dump(all_metrics, f, indent=2)
-    print(f"\nModel comparison table saved to {metrics_dir / 'model_comparison.csv'}")
-
-    # 8. Offline Rescheduling Simulator Scenario
-    print("\n[Stage 8/8] Running Offline Rescheduling Sensitivity Analysis & Generating Figures...")
-    best_calibrator = ModelCalibrator.load(models_dir / "xgboost_calibrator.pkl")
-    rescheduler = ReschedulingSimulator(
-        model_wrapper=xgb_model,
-        preprocessor=tabular_prep,
-        calibrator=best_calibrator,
-        is_pytorch=False,
+        pf = pd.read_csv(filename)
+        for col in ["flight_date", "carrier", "origin", "dest", "sched_dep_hour"]:
+            pf[col] = test_feat[col].to_numpy()
+        pf.to_csv(filename, index=False)
+        prediction_frames[key] = pf
+        print(
+            f'{name}: AP={result["pr_auc"]:.4f}, ROC-AUC={result["roc_auc"]:.4f}, Brier={result["brier_score_calibrated"]:.4f}, precision={result["precision_at_op_threshold"]:.3f}, recall={result["recall_at_op_threshold"]:.3f}, calibration={calibrator.method}',
+            flush=True,
+        )
+    prior = float(fitted.is_delayed.mean())
+    baseline_probs = np.full(len(test_feat), prior)
+    baseline = evaluate_predictions(
+        test_feat.is_delayed,
+        baseline_probs,
+        baseline_probs,
+        0.5,
+        "Constant training prior",
     )
+    baseline["constant_probability"] = prior
+    all_metrics.append(baseline)
+    save_json(metrics_dir / "evaluation_metrics.json", all_metrics)
+    create_model_comparison_table(all_metrics).to_csv(
+        metrics_dir / "model_comparison.csv", index=False
+    )
+    save_json(reports / "calibration_selection.json", calibration_records)
+    print(
+        "Running fixed-configuration feature ablations on development data...",
+        flush=True,
+    )
+    pd.DataFrame(
+        ablation_study(
+            fitted, blocks["calibration_selection"], hyperparams, random_seed
+        )
+    ).to_csv(metrics_dir / "feature_ablation.csv", index=False)
+    slices = []
+    for key, pf in prediction_frames.items():
+        for column in ["origin", "carrier", "sched_dep_hour", "flight_date"]:
+            for value, group in pf.groupby(column):
+                y = group.y_true.to_numpy()
+                slices.append(
+                    {
+                        "model": key,
+                        "group": column,
+                        "value": str(value),
+                        "n": len(group),
+                        "prevalence": float(y.mean()),
+                        "average_precision": (
+                            float(average_precision_score(y, group.prob_calibrated))
+                            if len(np.unique(y)) > 1
+                            else None
+                        ),
+                        "brier_score": float(
+                            brier_score_loss(y, group.prob_calibrated)
+                        ),
+                        "alert_count": int(group.y_pred_operational.sum()),
+                    }
+                )
+    pd.DataFrame(slices).to_csv(metrics_dir / "error_slices.csv", index=False)
+    plot_roc_curves(
+        probability_sets, test_feat.is_delayed.to_numpy(), figures / "roc_curves.png"
+    )
+    plot_pr_curves(
+        probability_sets, test_feat.is_delayed.to_numpy(), figures / "pr_curves.png"
+    )
+    plot_calibration_curves(all_metrics[:-1], figures / "calibration_curves.png")
+    plot_confusion_matrices(all_metrics, figures / "confusion_matrices.png")
+    plot_feature_importances(
+        xgb.get_feature_importances(xgb_prep.feature_names_),
+        output_path=figures / "feature_importances.png",
+    )
+    plot_delay_eda(fitted, figures)
+    print("Running non-causal rescheduling sensitivity cohort...", flush=True)
+    from src.calibration import ModelCalibrator
 
-    # Run simulator on representative test flight
-    sample_flight = test_feat.iloc[100]
-    reschedule_out = rescheduler.simulate_shifts_for_flight(sample_flight)
-    with open(reports_dir / "rescheduling_scenario_sample.json", "w") as f:
-        json.dump(reschedule_out, f, indent=2, default=json_serial)
-
-    # Publication Figures
-    figures_dir = results_dir / "figures"
-    figures_dir.mkdir(parents=True, exist_ok=True)
-    plot_roc_curves(test_prob_dict, y_test, figures_dir / "roc_curves.png")
-    plot_pr_curves(test_prob_dict, y_test, figures_dir / "pr_curves.png")
-    plot_calibration_curves(all_metrics, figures_dir / "calibration_curves.png")
-    plot_confusion_matrices(all_metrics, figures_dir / "confusion_matrices.png")
-
-    xgb_importances = xgb_model.get_feature_importances(tabular_prep.feature_names_)
-    plot_feature_importances(xgb_importances, top_n=20, output_path=figures_dir / "feature_importances.png")
-    plot_delay_eda(df_features, output_dir=figures_dir)
-    print(f"All evaluation figures saved to {figures_dir}")
-
-    # Complete Run Summary
-    run_summary = {
+    simulator = ReschedulingSimulator(
+        xgb,
+        xgb_prep,
+        ModelCalibrator.load(models_dir / "xgboost_calibrator.pkl"),
+        schedule_context=context,
+    )
+    cohort = []
+    for _, row in test_feat.sample(
+        n=min(100, len(test_feat)), random_state=random_seed
+    ).iterrows():
+        output = simulator.simulate_shifts_for_flight(row)
+        cohort.append(
+            {
+                "record_id": int(row["id"]),
+                "flight_date": str(row.flight_date.date()),
+                "baseline_probability": output["baseline_delay_probability"],
+                "shift_minutes": output["optimal_shift_minutes"],
+                "selected_probability": output["optimal_delay_probability"],
+                "risk_difference": output["best_risk_difference"],
+            }
+        )
+    pd.DataFrame(cohort).to_csv(reports / "rescheduling_cohort.csv", index=False)
+    sample = simulator.simulate_shifts_for_flight(test_feat.iloc[100])
+    save_json(reports / "rescheduling_scenario_sample.json", sample)
+    source_files = sorted(
+        (Path(__file__).resolve().parents[1] / "src").glob("*.py")
+    ) + [Path(__file__)]
+    source_hash = hashlib.sha256(
+        b"".join(p.read_bytes() for p in source_files)
+    ).hexdigest()
+    versions = {
+        p: importlib.metadata.version(p)
+        for p in [
+            "numpy",
+            "pandas",
+            "scikit-learn",
+            "xgboost",
+            "torch",
+            "matplotlib",
+            "seaborn",
+        ]
+    }
+    summary = {
         "status": "SUCCESS",
-        "dataset": audit_stats,
-        "split_manifest": split_manifest,
+        "protocol_version": 2,
+        "dataset": audit,
+        "split_manifest": manifest,
         "metrics_summary": [
             {
                 "model": m["model_name"],
                 "pr_auc": m["pr_auc"],
                 "roc_auc": m["roc_auc"],
                 "brier_score_calibrated": m["brier_score_calibrated"],
-                "operational_threshold": m["operational_threshold"],
-                "recall_at_op_threshold": m["recall_at_op_threshold"],
                 "precision_at_op_threshold": m["precision_at_op_threshold"],
-                "target_precision_met": m["threshold_selection_metadata"]["target_precision_met"],
+                "recall_at_op_threshold": m["recall_at_op_threshold"],
             }
             for m in all_metrics
         ],
-        "rescheduling_sample": reschedule_out,
-        "hyperparams": hparams.__dict__,
-        "device_used": str(device),
+        "selected_hyperparameters": {k: asdict(v) for k, v in hyperparams.items()},
+        "selected_feature_sets": search["selected_feature_sets"],
+        "rescheduling_sample": sample,
+        "rescheduling_cohort_size": len(cohort),
         "random_seed": random_seed,
+        "bootstrap": {
+            "method": "whole-date resampling",
+            "repeats": bootstrap_repeats,
+            "seed": random_seed,
+        },
+        "environment": versions,
+        "python": sys.version,
+        "source_sha256": source_hash,
+        "base_git_revision": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True
+        ).strip(),
+        "working_tree_changes": bool(
+            subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
+        ),
+        "elapsed_seconds": round(time.time() - started, 2),
+        "test_reuse_disclosure": "The original test results were inspected during review. This is a corrected retrospective reevaluation, not a newly untouched external test.",
+        "phase_scope": "Logistic Regression and XGBoost are the Phase 1 ML models. MLP is supplementary.",
     }
-    with open(results_dir / "run_summary.json", "w") as f:
-        json.dump(run_summary, f, indent=2, default=json_serial)
-    print(f"Pipeline complete! Summary saved to {results_dir / 'run_summary.json'}")
-
-    return run_summary
+    save_json(results_dir / "run_summary.json", summary)
+    legacy_preprocessor = models_dir / "tabular_preprocessor.pkl"
+    if legacy_preprocessor.exists():
+        legacy_preprocessor.unlink()
+    print(f'Completed in {summary["elapsed_seconds"]:.1f}s', flush=True)
+    return summary
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run flight delay prediction pipeline")
-    parser.add_argument("--data-path", type=str, default=str(RAW_DATA_PATH), help="Path to raw flights.csv")
-    parser.add_argument("--results-dir", type=str, default=str(RESULTS_DIR), help="Path to results directory")
-    parser.add_argument("--models-dir", type=str, default=str(MODELS_DIR), help="Path to models directory")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--target-precision", type=float, default=0.70, help="Operational target precision")
-    parser.add_argument("--epochs", type=int, default=15, help="Epochs for PyTorch MLP")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-path", type=Path, default=RAW_DATA_PATH)
+    parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
+    parser.add_argument("--models-dir", type=Path, default=MODELS_DIR)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--target-precision", type=float, default=0.70)
+    parser.add_argument("--epochs", type=int, default=15)
+    parser.add_argument("--skip-mlp", action="store_true")
+    parser.add_argument("--bootstrap-repeats", type=int, default=200)
     args = parser.parse_args()
-
     run_pipeline(
-        data_path=Path(args.data_path),
-        results_dir=Path(args.results_dir),
-        models_dir=Path(args.models_dir),
-        random_seed=args.seed,
-        target_precision=args.target_precision,
-        mlp_epochs=args.epochs,
+        args.data_path,
+        args.results_dir,
+        args.models_dir,
+        args.seed,
+        args.target_precision,
+        args.epochs,
+        not args.skip_mlp,
+        args.bootstrap_repeats,
     )

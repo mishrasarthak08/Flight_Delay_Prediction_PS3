@@ -31,5 +31,41 @@
     "row_proportion": 0.14840871738160846
   },
   "split_logic": "Strict chronological date partition. All flights from any given date are assigned to the same partition.",
-  "random_seed": 42
+  "random_seed": 42,
+  "model_fit": {
+    "fit_available_at": "2013-09-13T07:00:00+00:00",
+    "candidate_training_rows": 228299,
+    "fitted_rows": 227520,
+    "purged_unavailable_or_invalid_labels": 779
+  },
+  "history_policy": "Daily local-midnight snapshots of outcomes available after actual arrival plus 24h. Identical historical replay for training, development, test and inference. Estimator weights stay fixed.",
+  "development_blocks": {
+    "calibration_fit": {
+      "start_date": "2013-09-13",
+      "end_date": "2013-10-01",
+      "candidate_rows": 17398,
+      "usable_rows": 16434,
+      "purged_rows": 964,
+      "labels_available_before": "2013-10-02T07:00:00+00:00",
+      "prevalence": 0.1196300352926859
+    },
+    "calibration_selection": {
+      "start_date": "2013-10-02",
+      "end_date": "2013-10-19",
+      "candidate_rows": 16451,
+      "usable_rows": 15765,
+      "purged_rows": 686,
+      "labels_available_before": "2013-10-20T07:20:00+00:00",
+      "prevalence": 0.18750396447827467
+    },
+    "threshold_validation": {
+      "start_date": "2013-10-20",
+      "end_date": "2013-11-06",
+      "candidate_rows": 16617,
+      "usable_rows": 15646,
+      "purged_rows": 971,
+      "labels_available_before": "2013-11-07T08:00:00+00:00",
+      "prevalence": 0.17378243640547106
+    }
+  }
 }

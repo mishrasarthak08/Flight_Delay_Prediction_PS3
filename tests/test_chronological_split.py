@@ -2,7 +2,6 @@
 Unit tests for chronological date splitting and partition boundaries.
 """
 
-import pytest
 import pandas as pd
 import numpy as np
 
@@ -18,16 +17,18 @@ def test_chronological_split_disjoint_dates():
     for d in dates:
         n_flights = np.random.randint(10, 30)
         for _ in range(n_flights):
-            records.append({
-                "flight_date": d,
-                "sched_dep_time": 800,
-                "sched_arr_time": 1000,
-                "carrier": "UA",
-                "origin": "EWR",
-                "dest": "ORD",
-                "distance": 719,
-                TARGET_COL: np.random.choice([0, 1]),
-            })
+            records.append(
+                {
+                    "flight_date": d,
+                    "sched_dep_time": 800,
+                    "sched_arr_time": 1000,
+                    "carrier": "UA",
+                    "origin": "EWR",
+                    "dest": "ORD",
+                    "distance": 719,
+                    TARGET_COL: np.random.choice([0, 1]),
+                }
+            )
 
     df = pd.DataFrame(records)
     cfg = SplittingConfig(train_ratio=0.70, val_ratio=0.15, test_ratio=0.15)
@@ -50,4 +51,6 @@ def test_chronological_split_disjoint_dates():
     assert max(val_dates) < min(test_dates)
 
     # 4. Verify via validation helper
-    verify_no_future_leakage_in_splits(train_df["flight_date"], val_df["flight_date"], test_df["flight_date"])
+    verify_no_future_leakage_in_splits(
+        train_df["flight_date"], val_df["flight_date"], test_df["flight_date"]
+    )

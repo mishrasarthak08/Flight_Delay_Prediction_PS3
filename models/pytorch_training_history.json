@@ -1,0 +1,95 @@
+{
+  "checkpoint_selection": "fixed_epochs_no_monitor_selection",
+  "history": [
+    {
+      "epoch": 1,
+      "train_log_loss": 0.540513409659497,
+      "monitor_log_loss": 0.40730981161171637,
+      "monitor_average_precision": 0.17130792803391232
+    },
+    {
+      "epoch": 2,
+      "train_log_loss": 0.5301528016390847,
+      "monitor_log_loss": 0.3938792194924941,
+      "monitor_average_precision": 0.17038850400793223
+    },
+    {
+      "epoch": 3,
+      "train_log_loss": 0.5266651136462699,
+      "monitor_log_loss": 0.3886574321279448,
+      "monitor_average_precision": 0.17082421139392
+    },
+    {
+      "epoch": 4,
+      "train_log_loss": 0.5246221640441991,
+      "monitor_log_loss": 0.37107637520615194,
+      "monitor_average_precision": 0.1594173150024866
+    },
+    {
+      "epoch": 5,
+      "train_log_loss": 0.5230412878064666,
+      "monitor_log_loss": 0.3726500826507527,
+      "monitor_average_precision": 0.16219228592346124
+    },
+    {
+      "epoch": 6,
+      "train_log_loss": 0.5207508121194048,
+      "monitor_log_loss": 0.36509901232944,
+      "monitor_average_precision": 0.16263147393289032
+    },
+    {
+      "epoch": 7,
+      "train_log_loss": 0.5191859769921765,
+      "monitor_log_loss": 0.36202110928080156,
+      "monitor_average_precision": 0.16724302968096866
+    },
+    {
+      "epoch": 8,
+      "train_log_loss": 0.5181583384421304,
+      "monitor_log_loss": 0.36397144615512356,
+      "monitor_average_precision": 0.1591380489890929
+    },
+    {
+      "epoch": 9,
+      "train_log_loss": 0.5167905681160097,
+      "monitor_log_loss": 0.3647809812400816,
+      "monitor_average_precision": 0.1589227977626998
+    },
+    {
+      "epoch": 10,
+      "train_log_loss": 0.5154299222970311,
+      "monitor_log_loss": 0.36997205584795206,
+      "monitor_average_precision": 0.1576563792765804
+    },
+    {
+      "epoch": 11,
+      "train_log_loss": 0.5135009089099707,
+      "monitor_log_loss": 0.37094320470549497,
+      "monitor_average_precision": 0.14956480945554151
+    },
+    {
+      "epoch": 12,
+      "train_log_loss": 0.5127738428182911,
+      "monitor_log_loss": 0.37285484447377115,
+      "monitor_average_precision": 0.14911884872390804
+    },
+    {
+      "epoch": 13,
+      "train_log_loss": 0.5120068324014607,
+      "monitor_log_loss": 0.37288793503287876,
+      "monitor_average_precision": 0.14559639454007473
+    },
+    {
+      "epoch": 14,
+      "train_log_loss": 0.5112016433234289,
+      "monitor_log_loss": 0.37888802612467637,
+      "monitor_average_precision": 0.1430640568584802
+    },
+    {
+      "epoch": 15,
+      "train_log_loss": 0.5104242648924118,
+      "monitor_log_loss": 0.3820843001605676,
+      "monitor_average_precision": 0.1460826198083486
+    }
+  ]
+}

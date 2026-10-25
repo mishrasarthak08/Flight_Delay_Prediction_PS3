@@ -1,8 +1,35 @@
 {
   "status": "SUCCESS",
+  "protocol_version": 2,
   "dataset": {
     "initial_raw_rows": 336776,
     "initial_raw_cols": 21,
+    "raw_missing_counts": {
+      "id": 0,
+      "year": 0,
+      "month": 0,
+      "day": 0,
+      "dep_time": 8255,
+      "sched_dep_time": 0,
+      "dep_delay": 8255,
+      "arr_time": 8713,
+      "sched_arr_time": 0,
+      "arr_delay": 9430,
+      "carrier": 0,
+      "flight": 0,
+      "tailnum": 2512,
+      "origin": 0,
+      "dest": 0,
+      "air_time": 9430,
+      "distance": 0,
+      "hour": 0,
+      "minute": 0,
+      "time_hour": 0,
+      "name": 0
+    },
+    "duplicate_flight_keys": 0,
+    "invalid_dates_excluded": 0,
+    "invalid_distance_excluded": 0,
     "mapped_columns": {
       "arr_delay": "arr_delay",
       "sched_dep_time": "sched_dep_time",
@@ -52,7 +79,18 @@
       "LGA"
     ],
     "unique_destinations": 104,
-    "unique_routes": 223
+    "unique_routes": 223,
+    "historical_label_availability": {
+      "reporting_lag_hours": 24,
+      "arrival_clock_mismatches": 1,
+      "history_labels_excluded_by_timestamp_audit": 1,
+      "history_labels_usable": 327345,
+      "scheduled_arrival_date_assumption": "First destination local schedule clock after departure, trips under 24h.",
+      "reporting_assumption": "Arrival outcome becomes available 24h after reconstructed actual arrival; true feed timestamps unavailable."
+    },
+    "dataset_sha256": "8bdc6abbf07ac0cbb1036bc14a787cab3eea616be46c31899d2d8048963b08aa",
+    "source_url": "https://www.kaggle.com/datasets/matinsajadi/flights",
+    "schedule_roster_rows": 336776
   },
   "split_manifest": {
     "total_unique_dates": 365,
@@ -87,147 +125,266 @@
       "row_proportion": 0.14840871738160846
     },
     "split_logic": "Strict chronological date partition. All flights from any given date are assigned to the same partition.",
-    "random_seed": 42
+    "random_seed": 42,
+    "model_fit": {
+      "fit_available_at": "2013-09-13T07:00:00+00:00",
+      "candidate_training_rows": 228299,
+      "fitted_rows": 227520,
+      "purged_unavailable_or_invalid_labels": 779
+    },
+    "history_policy": "Daily local-midnight snapshots of outcomes available after actual arrival plus 24h. Identical historical replay for training, development, test and inference. Estimator weights stay fixed.",
+    "development_blocks": {
+      "calibration_fit": {
+        "start_date": "2013-09-13",
+        "end_date": "2013-10-01",
+        "candidate_rows": 17398,
+        "usable_rows": 16434,
+        "purged_rows": 964,
+        "labels_available_before": "2013-10-02T07:00:00+00:00",
+        "prevalence": 0.1196300352926859
+      },
+      "calibration_selection": {
+        "start_date": "2013-10-02",
+        "end_date": "2013-10-19",
+        "candidate_rows": 16451,
+        "usable_rows": 15765,
+        "purged_rows": 686,
+        "labels_available_before": "2013-10-20T07:20:00+00:00",
+        "prevalence": 0.18750396447827467
+      },
+      "threshold_validation": {
+        "start_date": "2013-10-20",
+        "end_date": "2013-11-06",
+        "candidate_rows": 16617,
+        "usable_rows": 15646,
+        "purged_rows": 971,
+        "labels_available_before": "2013-11-07T08:00:00+00:00",
+        "prevalence": 0.17378243640547106
+      }
+    }
   },
   "metrics_summary": [
     {
       "model": "Logistic Regression",
-      "pr_auc": 0.31316701392053836,
-      "roc_auc": 0.5773149366779466,
-      "brier_score_calibrated": 0.2145011333585104,
-      "operational_threshold": 0.889716386795044,
-      "recall_at_op_threshold": 0.0,
-      "precision_at_op_threshold": 0.0,
-      "target_precision_met": false
+      "pr_auc": 0.32003386519567634,
+      "roc_auc": 0.5796883615836962,
+      "brier_score_calibrated": 0.2395671709780346,
+      "precision_at_op_threshold": 0.33986754966887417,
+      "recall_at_op_threshold": 0.19667356480416953
     },
     {
       "model": "XGBoost",
-      "pr_auc": 0.36077581174811496,
-      "roc_auc": 0.6189063707306448,
-      "brier_score_calibrated": 0.19534176896122338,
-      "operational_threshold": 0.4606374502182007,
-      "recall_at_op_threshold": 0.05794435502414348,
-      "precision_at_op_threshold": 0.43953488372093025,
-      "target_precision_met": false
+      "pr_auc": 0.37224175262903936,
+      "roc_auc": 0.6367355538681392,
+      "brier_score_calibrated": 0.19097900917996438,
+      "precision_at_op_threshold": 0.3449379439544142,
+      "recall_at_op_threshold": 0.6773971027822487
     },
     {
       "model": "PyTorch Embedding MLP",
-      "pr_auc": 0.35849326766559814,
-      "roc_auc": 0.6134440477866909,
-      "brier_score_calibrated": 0.20304879183822552,
-      "operational_threshold": 0.503382682800293,
-      "recall_at_op_threshold": 0.0,
+      "pr_auc": 0.39362437447004317,
+      "roc_auc": 0.6505979628253791,
+      "brier_score_calibrated": 0.20174792063663732,
+      "precision_at_op_threshold": 0.3194645121339899,
+      "recall_at_op_threshold": 0.8303824634015482
+    },
+    {
+      "model": "Constant training prior",
+      "pr_auc": 0.2685617834132686,
+      "roc_auc": 0.5,
+      "brier_score_calibrated": 0.1965434148154385,
       "precision_at_op_threshold": 0.0,
-      "target_precision_met": false
+      "recall_at_op_threshold": 0.0
     }
   ],
+  "selected_hyperparameters": {
+    "logistic_regression": {
+      "lr_c": 0.03,
+      "lr_max_iter": 1000,
+      "lr_solver": "lbfgs",
+      "lr_class_weight": null,
+      "xgb_n_estimators": 150,
+      "xgb_max_depth": 5,
+      "xgb_learning_rate": 0.08,
+      "xgb_subsample": 1.0,
+      "xgb_colsample_bytree": 1.0,
+      "xgb_tree_method": "hist",
+      "xgb_n_jobs": 2,
+      "xgb_early_stopping_rounds": 15,
+      "xgb_eval_metric": "logloss",
+      "xgb_reg_lambda": 5.0,
+      "xgb_min_child_weight": 20.0,
+      "mlp_carrier_emb_dim": 16,
+      "mlp_origin_emb_dim": 16,
+      "mlp_dest_emb_dim": 32,
+      "mlp_hidden_dims": [
+        128,
+        64,
+        32
+      ],
+      "mlp_dropout": 0.2,
+      "mlp_learning_rate": 0.001,
+      "mlp_weight_decay": 0.0001,
+      "mlp_batch_size": 512,
+      "mlp_epochs": 20,
+      "mlp_early_stopping_patience": 5
+    },
+    "xgboost": {
+      "lr_c": 0.1,
+      "lr_max_iter": 1000,
+      "lr_solver": "lbfgs",
+      "lr_class_weight": "balanced",
+      "xgb_n_estimators": 42,
+      "xgb_max_depth": 3,
+      "xgb_learning_rate": 0.06,
+      "xgb_subsample": 1.0,
+      "xgb_colsample_bytree": 1.0,
+      "xgb_tree_method": "hist",
+      "xgb_n_jobs": 2,
+      "xgb_early_stopping_rounds": null,
+      "xgb_eval_metric": "logloss",
+      "xgb_reg_lambda": 5.0,
+      "xgb_min_child_weight": 100.0,
+      "mlp_carrier_emb_dim": 16,
+      "mlp_origin_emb_dim": 16,
+      "mlp_dest_emb_dim": 32,
+      "mlp_hidden_dims": [
+        128,
+        64,
+        32
+      ],
+      "mlp_dropout": 0.2,
+      "mlp_learning_rate": 0.001,
+      "mlp_weight_decay": 0.0001,
+      "mlp_batch_size": 512,
+      "mlp_epochs": 20,
+      "mlp_early_stopping_patience": 5
+    }
+  },
+  "selected_feature_sets": {
+    "logistic_regression": "history_rates_demand",
+    "xgboost": "cyclic_schedule_demand"
+  },
   "rescheduling_sample": {
     "flight_info": {
       "carrier": "AA",
       "origin": "JFK",
       "dest": "MIA",
       "original_sched_dep": "07:10",
-      "distance": 1089
+      "distance": 1089.0
     },
-    "baseline_delay_probability": 0.0931,
-    "optimal_shift_minutes": 0,
-    "optimal_delay_probability": 0.0931,
-    "best_risk_difference": 0.0,
+    "baseline_delay_probability": 0.10281077772378922,
+    "optimal_shift_minutes": -30,
+    "optimal_delay_probability": 0.10014408826828003,
+    "best_risk_difference": -0.002666689455509186,
     "scenarios": [
       {
         "shift_minutes": -60,
-        "predicted_delay_probability": 0.0931,
-        "absolute_risk_difference": -0.0,
-        "relative_risk_change_pct": -0.0
+        "candidate_departure": "2013-11-07T11:10:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.10014408826828003,
+        "absolute_risk_difference": -0.002666689455509186,
+        "relative_risk_change_pct": -2.593783953928932
       },
       {
         "shift_minutes": -30,
-        "predicted_delay_probability": 0.0931,
-        "absolute_risk_difference": -0.0,
-        "relative_risk_change_pct": -0.0
+        "candidate_departure": "2013-11-07T11:40:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.10014408826828003,
+        "absolute_risk_difference": -0.002666689455509186,
+        "relative_risk_change_pct": -2.593783953928932
       },
       {
         "shift_minutes": 0,
-        "predicted_delay_probability": 0.0931,
+        "candidate_departure": "2013-11-07T12:10:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.10281077772378922,
         "absolute_risk_difference": 0.0,
         "relative_risk_change_pct": 0.0
       },
       {
         "shift_minutes": 30,
-        "predicted_delay_probability": 0.0931,
-        "absolute_risk_difference": -0.0,
-        "relative_risk_change_pct": -0.0
+        "candidate_departure": "2013-11-07T12:40:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.10281077772378922,
+        "absolute_risk_difference": 0.0,
+        "relative_risk_change_pct": 0.0
       },
       {
         "shift_minutes": 60,
-        "predicted_delay_probability": 0.1021,
-        "absolute_risk_difference": 0.009,
-        "relative_risk_change_pct": 9.64
+        "candidate_departure": "2013-11-07T13:10:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.11647772043943405,
+        "absolute_risk_difference": 0.013666942715644836,
+        "relative_risk_change_pct": 13.293297666089405
       }
     ],
     "ranked_candidates": [
       {
+        "shift_minutes": -30,
+        "candidate_departure": "2013-11-07T11:40:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.10014408826828003,
+        "absolute_risk_difference": -0.002666689455509186,
+        "relative_risk_change_pct": -2.593783953928932
+      },
+      {
+        "shift_minutes": -60,
+        "candidate_departure": "2013-11-07T11:10:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.10014408826828003,
+        "absolute_risk_difference": -0.002666689455509186,
+        "relative_risk_change_pct": -2.593783953928932
+      },
+      {
         "shift_minutes": 0,
-        "predicted_delay_probability": 0.0931,
+        "candidate_departure": "2013-11-07T12:10:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.10281077772378922,
         "absolute_risk_difference": 0.0,
         "relative_risk_change_pct": 0.0
       },
       {
-        "shift_minutes": -30,
-        "predicted_delay_probability": 0.0931,
-        "absolute_risk_difference": -0.0,
-        "relative_risk_change_pct": -0.0
-      },
-      {
         "shift_minutes": 30,
-        "predicted_delay_probability": 0.0931,
-        "absolute_risk_difference": -0.0,
-        "relative_risk_change_pct": -0.0
-      },
-      {
-        "shift_minutes": -60,
-        "predicted_delay_probability": 0.0931,
-        "absolute_risk_difference": -0.0,
-        "relative_risk_change_pct": -0.0
+        "candidate_departure": "2013-11-07T12:40:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.10281077772378922,
+        "absolute_risk_difference": 0.0,
+        "relative_risk_change_pct": 0.0
       },
       {
         "shift_minutes": 60,
-        "predicted_delay_probability": 0.1021,
-        "absolute_risk_difference": 0.009,
-        "relative_risk_change_pct": 9.64
+        "candidate_departure": "2013-11-07T13:10:00+00:00",
+        "scheduled_duration_minutes": 195.0,
+        "predicted_delay_probability": 0.11647772043943405,
+        "absolute_risk_difference": 0.013666942715644836,
+        "relative_risk_change_pct": 13.293297666089405
       }
     ],
-    "disclaimer": "DISCLAIMER: This offline rescheduling simulator calculates what-if model risk predictions based on historically observed schedule patterns. It does NOT prove causal delay reduction. Real-world flight rescheduling must account for aircraft tail rotations, airport slot constraints, gate availability, FAA ground delay programs, crew duty limitations, and passenger connections, none of which are modeled in this statistical analysis."
+    "disclaimer": "DISCLAIMER: These are offline model sensitivity predictions, not causal delay reductions. Aircraft rotations, airport slots, gates, crews, connections and reactions by other flights are not modeled. The original historical information set remains fixed. Timetable counts assume the source schedule is known at the decision time.",
+    "congestion_assumption": "One focal flight shifts against a fixed background timetable."
   },
-  "hyperparams": {
-    "lr_c": 0.1,
-    "lr_max_iter": 1000,
-    "lr_solver": "lbfgs",
-    "lr_class_weight": "balanced",
-    "xgb_n_estimators": 150,
-    "xgb_max_depth": 5,
-    "xgb_learning_rate": 0.08,
-    "xgb_subsample": 1.0,
-    "xgb_colsample_bytree": 1.0,
-    "xgb_tree_method": "hist",
-    "xgb_n_jobs": 2,
-    "xgb_early_stopping_rounds": 15,
-    "xgb_eval_metric": "logloss",
-    "mlp_carrier_emb_dim": 16,
-    "mlp_origin_emb_dim": 16,
-    "mlp_dest_emb_dim": 32,
-    "mlp_hidden_dims": [
-      128,
-      64,
-      32
-    ],
-    "mlp_dropout": 0.2,
-    "mlp_learning_rate": 0.001,
-    "mlp_weight_decay": 0.0001,
-    "mlp_batch_size": 512,
-    "mlp_epochs": 4,
-    "mlp_early_stopping_patience": 5
+  "rescheduling_cohort_size": 100,
+  "random_seed": 42,
+  "bootstrap": {
+    "method": "whole-date resampling",
+    "repeats": 200,
+    "seed": 42
   },
-  "device_used": "cpu",
-  "random_seed": 42
+  "environment": {
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "scikit-learn": "1.9.1",
+    "xgboost": "3.4.1",
+    "torch": "2.14.1",
+    "matplotlib": "3.11.2",
+    "seaborn": "0.13.2"
+  },
+  "python": "3.12.14 (main, Aug 25 2026, 13:50:33) [Clang 22.1.3 ]",
+  "source_sha256": "16c457c58013b6610dc2a629f7d5317a95d5f6397886e84bbad089849095f8d1",
+  "base_git_revision": "66010c564ddd5ce01c9441ffc42ca8e01830c6d5",
+  "working_tree_changes": true,
+  "elapsed_seconds": 290.98,
+  "test_reuse_disclosure": "The original test results were inspected during review. This is a corrected retrospective reevaluation, not a newly untouched external test.",
+  "phase_scope": "Logistic Regression and XGBoost are the Phase 1 ML models. MLP is supplementary."
 }

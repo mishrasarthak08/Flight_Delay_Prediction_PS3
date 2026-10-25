@@ -1,6 +1,32 @@
 {
   "initial_raw_rows": 336776,
   "initial_raw_cols": 21,
+  "raw_missing_counts": {
+    "id": 0,
+    "year": 0,
+    "month": 0,
+    "day": 0,
+    "dep_time": 8255,
+    "sched_dep_time": 0,
+    "dep_delay": 8255,
+    "arr_time": 8713,
+    "sched_arr_time": 0,
+    "arr_delay": 9430,
+    "carrier": 0,
+    "flight": 0,
+    "tailnum": 2512,
+    "origin": 0,
+    "dest": 0,
+    "air_time": 9430,
+    "distance": 0,
+    "hour": 0,
+    "minute": 0,
+    "time_hour": 0,
+    "name": 0
+  },
+  "duplicate_flight_keys": 0,
+  "invalid_dates_excluded": 0,
+  "invalid_distance_excluded": 0,
   "mapped_columns": {
     "arr_delay": "arr_delay",
     "sched_dep_time": "sched_dep_time",
@@ -50,5 +76,16 @@
     "LGA"
   ],
   "unique_destinations": 104,
-  "unique_routes": 223
+  "unique_routes": 223,
+  "historical_label_availability": {
+    "reporting_lag_hours": 24,
+    "arrival_clock_mismatches": 1,
+    "history_labels_excluded_by_timestamp_audit": 1,
+    "history_labels_usable": 327345,
+    "scheduled_arrival_date_assumption": "First destination local schedule clock after departure, trips under 24h.",
+    "reporting_assumption": "Arrival outcome becomes available 24h after reconstructed actual arrival; true feed timestamps unavailable."
+  },
+  "dataset_sha256": "8bdc6abbf07ac0cbb1036bc14a787cab3eea616be46c31899d2d8048963b08aa",
+  "source_url": "https://www.kaggle.com/datasets/matinsajadi/flights",
+  "schedule_roster_rows": 336776
 }

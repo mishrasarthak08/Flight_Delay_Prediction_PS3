@@ -1,51 +1,55 @@
-# Flight Delay Prediction - Dataset Audit Report
+# Dataset audit
 
-## 1. Executive Summary
-- **Source File**: `flights.csv`
-- **Total Raw Records**: 336,776
-- **Total Raw Columns**: 21
-- **Operated Flights with Observed Outcome**: 327,346 (97.20%)
-- **Excluded Flights (Cancellations & Diversions)**: 9,430 (2.80%)
+Raw scheduled flights: **336,776**. Observed arrival outcomes: **327,346**.
+Missing arrival outcomes excluded from supervision: **9,430**. Their individual exclusion reasons are not fully verified.
+Target: arrival delay at least 15 minutes. Positive prevalence: **24.47%**.
+Duplicate flight keys: **0**. Raw destinations: **105**. Supervised destinations: **104**.
 
-## 2. Operational Prediction Contract
-- **Declared Prediction Timestamp**: 2 hours before scheduled departure (`CRSDepTime` / `sched_dep_time`).
-- **Target Variable**: `is_delayed` (Binary: 1 if `arr_delay` >= 15.0 mins, else 0).
-- **Delayed Flights (Target = 1)**: 80,100
-- **On-Time Flights (Target = 0)**: 247,246
-- **Positive Class Prevalence**: **24.47%**
+## Missingness
 
-## 3. Date & Geographic Coverage
-- **Temporal Range**: 2013-01-01 to 2013-12-31 (365 unique calendar dates)
-- **Origin Airports (3)**: EWR, JFK, LGA
-- **Unique Destination Airports**: 104
-- **Unique Airline Carriers (16)**: 9E, AA, AS, B6, DL, EV, F9, FL, HA, MQ, OO, UA, US, VX, WN, YV
-- **Unique Operational Routes**: 223
+| Column | Missing rows | Fraction |
+|---|---:|---:|
+| id | 0 | 0.00% |
+| year | 0 | 0.00% |
+| month | 0 | 0.00% |
+| day | 0 | 0.00% |
+| dep_time | 8,255 | 2.45% |
+| sched_dep_time | 0 | 0.00% |
+| dep_delay | 8,255 | 2.45% |
+| arr_time | 8,713 | 2.59% |
+| sched_arr_time | 0 | 0.00% |
+| arr_delay | 9,430 | 2.80% |
+| carrier | 0 | 0.00% |
+| flight | 0 | 0.00% |
+| tailnum | 2,512 | 0.75% |
+| origin | 0 | 0.00% |
+| dest | 0 | 0.00% |
+| air_time | 9,430 | 2.80% |
+| distance | 0 | 0.00% |
+| hour | 0 | 0.00% |
+| minute | 0 | 0.00% |
+| time_hour | 0 | 0.00% |
+| name | 0 | 0.00% |
 
-## 4. Missing Value Breakdown (Raw Data)
-| Column Name | Missing Count | Missing Percentage |
-| :--- | :--- | :--- |
-| `id` | 0 | 0.00% |
-| `year` | 0 | 0.00% |
-| `month` | 0 | 0.00% |
-| `day` | 0 | 0.00% |
-| `dep_time` | 8,255 | 2.45% |
-| `sched_dep_time` | 0 | 0.00% |
-| `dep_delay` | 8,255 | 2.45% |
-| `arr_time` | 8,713 | 2.59% |
-| `sched_arr_time` | 0 | 0.00% |
-| `arr_delay` | 9,430 | 2.80% |
-| `carrier` | 0 | 0.00% |
-| `flight` | 0 | 0.00% |
-| `tailnum` | 2,512 | 0.75% |
-| `origin` | 0 | 0.00% |
-| `dest` | 0 | 0.00% |
-| `air_time` | 9,430 | 2.80% |
-| `distance` | 0 | 0.00% |
-| `hour` | 0 | 0.00% |
-| `minute` | 0 | 0.00% |
-| `time_hour` | 0 | 0.00% |
-| `name` | 0 | 0.00% |
+## Historical label availability
 
-## 5. Leakage Prevention and Column Classification
-- **Allowed Pre-Departure Features**: Scheduled departure/arrival hour and minute, cyclical transformations, distance, route, airline carrier, origin, destination, calendar date indicators, and past-only smoothed historical delay rates.
-- **Prohibited Outcome Fields**: `dep_time`, `dep_delay`, `arr_time`, `arr_delay`, `air_time`, `taxi_out`, `taxi_in`, `wheels_off`, `wheels_on`, delay causal breakdowns. All post-departure and current-flight outcome fields are strictly excluded from model feature matrices.
+|                                            | value                                                                                                       |
+|:-------------------------------------------|:------------------------------------------------------------------------------------------------------------|
+| reporting_lag_hours                        | 24                                                                                                          |
+| arrival_clock_mismatches                   | 1                                                                                                           |
+| history_labels_excluded_by_timestamp_audit | 1                                                                                                           |
+| history_labels_usable                      | 327345                                                                                                      |
+| scheduled_arrival_date_assumption          | First destination local schedule clock after departure, trips under 24h.                                    |
+| reporting_assumption                       | Arrival outcome becomes available 24h after reconstructed actual arrival; true feed timestamps unavailable. |
+
+Current-flight outcomes are never predictors. These timestamps govern release of historical labels only.
+The source lacks actual publication timestamps. Arrival plus 24 hours is a declared assumption.
+
+## Provenance
+
+CSV SHA-256: `8bdc6abbf07ac0cbb1036bc14a787cab3eea616be46c31899d2d8048963b08aa`
+
+Source: https://www.kaggle.com/datasets/matinsajadi/flights
+Original schema: https://nycflights13.tidyverse.org/reference/flights.html
+
+This raw audit does not replace results/reports/dataset_profile.json, which belongs to the trained run.
