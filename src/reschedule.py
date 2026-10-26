@@ -120,16 +120,16 @@ class ReschedulingSimulator:
         results = []
         for (_, row), probability in zip(frame.iterrows(), probabilities):
             probability = float(probability)
-            difference = probability - baseline
+            risk_difference = probability - baseline
             results.append(
                 {
                     "shift_minutes": int(row.shift_minutes),
                     "candidate_departure": row.scheduled_departure_utc.isoformat(),
                     "scheduled_duration_minutes": float(row.scheduled_duration_minutes),
                     "predicted_delay_probability": probability,
-                    "absolute_risk_difference": difference,
+                    "absolute_risk_difference": risk_difference,
                     "relative_risk_change_pct": (
-                        difference / baseline * 100 if baseline else None
+                        risk_difference / baseline * 100 if baseline else None
                     ),
                 }
             )
